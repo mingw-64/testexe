@@ -1,132 +1,278 @@
 --[[
-    Advanced Crosshair / Custom Aim Detector
-    Phát hiện crosshair dù đặt tên gì, dùng cách gì
+    Mobile-First Crosshair Detector
+    Tự động scale theo màn hình
     LocalScript → StarterGui
+    
+    Hoạt động trên: Mobile / Tablet / PC
 ]]
 
 local Players          = game:GetService("Players")
 local RunService       = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local GuiService       = game:GetService("GuiService")
-local Mouse            = Players.LocalPlayer:GetMouse()
+local TweenService     = game:GetService("TweenService")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui   = LocalPlayer:WaitForChild("PlayerGui")
 local Camera      = workspace.CurrentCamera
+local Mouse       = LocalPlayer:GetMouse()
 
 -------------------------------------------------
--- DETECTION CONFIG
+-- AUTO DETECT DEVICE
 -------------------------------------------------
+local IS_MOBILE  = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+local IS_TABLET  = IS_MOBILE and (Camera.ViewportSize.X > 1000)
+local IS_PC      = UserInputService.KeyboardEnabled
+
+local DEVICE_NAME = IS_MOBILE and (IS_TABLET and "Tablet" or "Phone") or "PC"
+
+-------------------------------------------------
+-- RESPONSIVE CONFIG (tự scale theo màn hình)
+-------------------------------------------------
+local function getScale()
+    local vp = Camera.ViewportSize
+    local shortSide = math.min(vp.X, vp.Y)
+
+    if shortSide < 400 then return 0.65 end   -- điện thoại nhỏ
+    if shortSide < 600 then return 0.75 end   -- điện thoại thường
+    if shortSide < 900 then return 0.85 end   -- tablet
+    return 1                                    -- PC / màn hình lớn
+end
+
+local UI_SCALE = getScale()
+
+local function S(pixels)
+    return math.floor(pixels * UI_SCALE)
+end
+
 local DETECT = {
-    -- Vùng trung tâm màn hình (pixel từ center)
-    CENTER_RADIUS_TIGHT  = 40,   -- chắc chắn là crosshair
-    CENTER_RADIUS_MEDIUM = 80,   -- khả năng cao
-    CENTER_RADIUS_WIDE   = 150,  -- có thể
-
-    -- Kích thước crosshair thường gặp
-    MAX_CROSSHAIR_SIZE = 120,    -- pixel
-    MIN_CROSSHAIR_SIZE = 1,      -- pixel
-
-    -- Cross pattern detection
-    THIN_THRESHOLD     = 8,      -- pixel, thanh mỏng
-    CROSS_GAP_TOLERANCE = 15,    -- pixel, khoảng cách giữa các thanh
-
-    -- Confidence threshold
-    MIN_CONFIDENCE = 40,         -- % để coi là crosshair
+    CENTER_RADIUS_TIGHT  = 40,
+    CENTER_RADIUS_MEDIUM = 80,
+    CENTER_RADIUS_WIDE   = 150,
+    MAX_CROSSHAIR_SIZE   = 120,
+    MIN_CROSSHAIR_SIZE   = 1,
+    THIN_THRESHOLD       = 8,
+    CROSS_GAP_TOLERANCE  = 15,
+    MIN_CONFIDENCE       = 40,
 }
 
 -------------------------------------------------
--- GUI
+-- GUI CREATION
 -------------------------------------------------
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name         = "CrosshairDetectorGui"
-ScreenGui.ResetOnSpawn = false
-ScreenGui.DisplayOrder = 99999
-ScreenGui.Parent       = PlayerGui
+ScreenGui.Name           = "MobileCrosshairDetector"
+ScreenGui.ResetOnSpawn   = false
+ScreenGui.DisplayOrder   = 99999
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.Parent         = PlayerGui
 
--- Toggle Button
+-- ═══════════════════════════════════════
+-- TOGGLE BUTTON (luôn hiển thị, dễ bấm)
+-- ═══════════════════════════════════════
 local ToggleBtn = Instance.new("TextButton")
-ToggleBtn.Size             = UDim2.new(0, 160, 0, 44)
-ToggleBtn.Position         = UDim2.new(1, -170, 0, 10)
-ToggleBtn.BackgroundColor3 = Color3.fromRGB(150, 30, 30)
-ToggleBtn.TextColor3       = Color3.new(1, 1, 1)
-ToggleBtn.Font             = Enum.Font.GothamBold
-ToggleBtn.TextSize         = 13
-ToggleBtn.Text             = "🎯 Detector OFF"
-ToggleBtn.BorderSizePixel  = 0
-ToggleBtn.ZIndex           = 100
-ToggleBtn.Parent           = ScreenGui
-Instance.new("UICorner", ToggleBtn).CornerRadius = UDim.new(0, 10)
+ToggleBtn.Name              = "ToggleBtn"
+ToggleBtn.BackgroundColor3  = Color3.fromRGB(180, 30, 30)
+ToggleBtn.TextColor3        = Color3.new(1, 1, 1)
+ToggleBtn.Font              = Enum.Font.GothamBold
+ToggleBtn.BorderSizePixel   = 0
+ToggleBtn.ZIndex            = 100
+ToggleBtn.Text              = "🎯 OFF"
+ToggleBtn.Parent            = ScreenGui
 
--- Main Panel
+-- Mobile: nút to hơn, dễ bấm ngón tay
+if IS_MOBILE then
+    ToggleBtn.Size     = UDim2.new(0, S(120), 0, S(50))
+    ToggleBtn.Position = UDim2.new(0, S(10), 0, S(40))
+    ToggleBtn.TextSize = S(14)
+else
+    ToggleBtn.Size     = UDim2.new(0, 140, 0, 40)
+    ToggleBtn.Position = UDim2.new(1, -150, 0, 10)
+    ToggleBtn.TextSize = 14
+end
+Instance.new("UICorner", ToggleBtn).CornerRadius = UDim.new(0, S(10))
+local tStroke = Instance.new("UIStroke", ToggleBtn)
+tStroke.Color = Color3.new(1,1,1); tStroke.Transparency = 0.5; tStroke.Thickness = S(2)
+
+-- ═══════════════════════════════════════
+-- MAIN PANEL (responsive)
+-- ═══════════════════════════════════════
 local Panel = Instance.new("Frame")
-Panel.Size              = UDim2.new(0, 560, 0, 620)
-Panel.Position          = UDim2.new(0.5, -280, 0.5, -310)
-Panel.BackgroundColor3  = Color3.fromRGB(12, 12, 22)
+Panel.Name              = "MainPanel"
+Panel.BackgroundColor3  = Color3.fromRGB(10, 10, 20)
 Panel.BorderSizePixel   = 0
 Panel.Visible           = false
 Panel.Active            = true
-Panel.Draggable         = true
 Panel.Parent            = ScreenGui
-Instance.new("UICorner", Panel).CornerRadius = UDim.new(0, 12)
-local ps = Instance.new("UIStroke", Panel)
-ps.Color = Color3.fromRGB(255, 80, 80); ps.Thickness = 2
+Panel.ZIndex            = 50
+Instance.new("UICorner", Panel).CornerRadius = UDim.new(0, S(14))
+local pStroke = Instance.new("UIStroke", Panel)
+pStroke.Color = Color3.fromRGB(255, 60, 60); pStroke.Thickness = S(2)
 
--- Title
-local Title = Instance.new("TextLabel")
-Title.Size                  = UDim2.new(1, -50, 0, 40)
-Title.Position              = UDim2.new(0, 12, 0, 0)
-Title.BackgroundTransparency = 1
-Title.Font                  = Enum.Font.GothamBold
-Title.TextSize              = 15
-Title.TextColor3            = Color3.fromRGB(255, 80, 80)
-Title.TextXAlignment        = Enum.TextXAlignment.Left
-Title.RichText              = true
-Title.Text                  = "🎯 Custom Crosshair Detector — Advanced Analysis"
-Title.Parent                = Panel
+-- Responsive panel size
+if IS_MOBILE and not IS_TABLET then
+    -- Phone: gần full màn hình
+    Panel.Size     = UDim2.new(0.95, 0, 0.8, 0)
+    Panel.Position = UDim2.new(0.025, 0, 0.1, 0)
+else
+    Panel.Size     = UDim2.new(0, S(540), 0, S(580))
+    Panel.Position = UDim2.new(0.5, -S(270), 0.5, -S(290))
+end
 
+-- ═══════════════════════════════════════
+-- DRAGGING (hoạt động trên cả mobile)
+-- ═══════════════════════════════════════
+local dragging    = false
+local dragStart   = nil
+local startPos    = nil
+
+local function onDragStart(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 
+    or input.UserInputType == Enum.UserInputType.Touch then
+        dragging  = true
+        dragStart = input.Position
+        startPos  = Panel.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end
+
+local function onDragMove(input)
+    if not dragging then return end
+    if input.UserInputType == Enum.UserInputType.MouseMovement 
+    or input.UserInputType == Enum.UserInputType.Touch then
+        local delta = input.Position - dragStart
+        Panel.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
+    end
+end
+
+-- Title Bar (vùng kéo)
+local TitleBar = Instance.new("Frame")
+TitleBar.Name                  = "TitleBar"
+TitleBar.Size                  = UDim2.new(1, 0, 0, S(48))
+TitleBar.BackgroundColor3      = Color3.fromRGB(20, 10, 10)
+TitleBar.BorderSizePixel       = 0
+TitleBar.ZIndex                = 51
+TitleBar.Parent                = Panel
+Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, S(14))
+
+-- Fix bottom corners
+local titleFix = Instance.new("Frame")
+titleFix.Size             = UDim2.new(1, 0, 0, S(14))
+titleFix.Position         = UDim2.new(0, 0, 1, -S(14))
+titleFix.BackgroundColor3 = Color3.fromRGB(20, 10, 10)
+titleFix.BorderSizePixel  = 0
+titleFix.ZIndex           = 51
+titleFix.Parent           = TitleBar
+
+TitleBar.InputBegan:Connect(onDragStart)
+TitleBar.InputChanged:Connect(onDragMove)
+UserInputService.InputChanged:Connect(onDragMove)
+
+-- Title Label
+local TitleLabel = Instance.new("TextLabel")
+TitleLabel.Size                  = UDim2.new(1, -S(90), 1, 0)
+TitleLabel.Position              = UDim2.new(0, S(12), 0, 0)
+TitleLabel.BackgroundTransparency = 1
+TitleLabel.Font                  = Enum.Font.GothamBold
+TitleLabel.TextColor3            = Color3.fromRGB(255, 80, 80)
+TitleLabel.TextXAlignment        = Enum.TextXAlignment.Left
+TitleLabel.TextTruncate          = Enum.TextTruncate.AtEnd
+TitleLabel.RichText              = true
+TitleLabel.ZIndex                = 52
+TitleLabel.Parent                = TitleBar
+
+if IS_MOBILE and not IS_TABLET then
+    TitleLabel.TextSize = S(13)
+    TitleLabel.Text     = "🎯 Crosshair Detector"
+else
+    TitleLabel.TextSize = S(15)
+    TitleLabel.Text     = "🎯 Crosshair Detector — " .. DEVICE_NAME
+end
+
+-- Device Badge
+local DeviceBadge = Instance.new("TextLabel")
+DeviceBadge.Size                  = UDim2.new(0, S(70), 0, S(22))
+DeviceBadge.Position              = UDim2.new(1, -S(110), 0.5, -S(11))
+DeviceBadge.BackgroundColor3      = IS_MOBILE 
+    and Color3.fromRGB(0, 120, 200) 
+    or Color3.fromRGB(100, 60, 200)
+DeviceBadge.TextColor3            = Color3.new(1, 1, 1)
+DeviceBadge.Font                  = Enum.Font.GothamBold
+DeviceBadge.TextSize              = S(11)
+DeviceBadge.Text                  = IS_MOBILE and "📱 Mobile" or "💻 PC"
+DeviceBadge.BorderSizePixel       = 0
+DeviceBadge.ZIndex                = 52
+DeviceBadge.Parent                = TitleBar
+Instance.new("UICorner", DeviceBadge).CornerRadius = UDim.new(0, S(6))
+
+-- Close Button
 local CloseBtn = Instance.new("TextButton")
-CloseBtn.Size             = UDim2.new(0, 32, 0, 32)
-CloseBtn.Position         = UDim2.new(1, -38, 0, 4)
+CloseBtn.Size             = UDim2.new(0, S(38), 0, S(38))
+CloseBtn.Position         = UDim2.new(1, -S(42), 0, S(5))
 CloseBtn.BackgroundColor3 = Color3.fromRGB(200, 40, 40)
 CloseBtn.TextColor3       = Color3.new(1, 1, 1)
 CloseBtn.Font             = Enum.Font.GothamBold
-CloseBtn.TextSize         = 18
+CloseBtn.TextSize         = S(20)
 CloseBtn.Text             = "✕"
 CloseBtn.BorderSizePixel  = 0
-CloseBtn.Parent           = Panel
-Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 8)
+CloseBtn.ZIndex           = 52
+CloseBtn.Parent           = TitleBar
+Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, S(8))
 
--- Stats
-local StatsLabel = Instance.new("TextLabel")
-StatsLabel.Size                  = UDim2.new(1, -16, 0, 50)
-StatsLabel.Position              = UDim2.new(0, 8, 0, 40)
-StatsLabel.BackgroundTransparency = 1
-StatsLabel.Font                  = Enum.Font.RobotoMono
-StatsLabel.TextSize              = 12
-StatsLabel.TextColor3            = Color3.fromRGB(180, 180, 180)
-StatsLabel.TextXAlignment        = Enum.TextXAlignment.Left
-StatsLabel.TextYAlignment        = Enum.TextYAlignment.Top
-StatsLabel.RichText              = true
-StatsLabel.TextWrapped           = true
-StatsLabel.Text                  = ""
-StatsLabel.Parent                = Panel
+-- ═══════════════════════════════════════
+-- INFO BAR
+-- ═══════════════════════════════════════
+local InfoBar = Instance.new("TextLabel")
+InfoBar.Size                  = UDim2.new(1, -S(16), 0, S(45))
+InfoBar.Position              = UDim2.new(0, S(8), 0, S(52))
+InfoBar.BackgroundColor3      = Color3.fromRGB(20, 20, 35)
+InfoBar.BackgroundTransparency = 0.3
+InfoBar.TextColor3            = Color3.fromRGB(180, 180, 180)
+InfoBar.Font                  = Enum.Font.RobotoMono
+InfoBar.TextSize              = S(11)
+InfoBar.TextXAlignment        = Enum.TextXAlignment.Left
+InfoBar.TextYAlignment        = Enum.TextYAlignment.Top
+InfoBar.TextWrapped           = true
+InfoBar.RichText              = true
+InfoBar.BorderSizePixel       = 0
+InfoBar.ZIndex                = 51
+InfoBar.Text                  = ""
+InfoBar.Parent                = Panel
+Instance.new("UICorner", InfoBar).CornerRadius = UDim.new(0, S(8))
+local infoPad = Instance.new("UIPadding", InfoBar)
+infoPad.PaddingLeft = UDim.new(0, S(8)); infoPad.PaddingTop = UDim.new(0, S(4))
 
--- Scroll
+-- ═══════════════════════════════════════
+-- SCROLL FRAME
+-- ═══════════════════════════════════════
 local Scroll = Instance.new("ScrollingFrame")
-Scroll.Size                   = UDim2.new(1, -16, 1, -100)
-Scroll.Position               = UDim2.new(0, 8, 0, 94)
+Scroll.Size                   = UDim2.new(1, -S(12), 1, -S(105))
+Scroll.Position               = UDim2.new(0, S(6), 0, S(100))
 Scroll.BackgroundTransparency = 1
 Scroll.BorderSizePixel        = 0
-Scroll.ScrollBarThickness     = 6
+Scroll.ScrollBarThickness     = IS_MOBILE and S(8) or S(6)
 Scroll.ScrollBarImageColor3   = Color3.fromRGB(255, 80, 80)
 Scroll.AutomaticCanvasSize    = Enum.AutomaticSize.Y
 Scroll.CanvasSize             = UDim2.new(0, 0, 0, 0)
+Scroll.ZIndex                 = 51
+Scroll.ElasticBehavior        = Enum.ElasticBehavior.Always
+Scroll.ScrollingDirection     = Enum.ScrollingDirection.Y
 Scroll.Parent                 = Panel
 
-Instance.new("UIPadding", Scroll).PaddingTop = UDim.new(0, 4)
+local sPad = Instance.new("UIPadding", Scroll)
+sPad.PaddingTop    = UDim.new(0, S(4))
+sPad.PaddingBottom = UDim.new(0, S(4))
+sPad.PaddingLeft   = UDim.new(0, S(2))
+sPad.PaddingRight  = UDim.new(0, S(2))
+
 local sLayout = Instance.new("UIListLayout", Scroll)
-sLayout.Padding   = UDim.new(0, 4)
+sLayout.Padding   = UDim.new(0, S(4))
 sLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
 -------------------------------------------------
@@ -163,244 +309,219 @@ local function isActuallyVisible(obj)
     return true
 end
 
-local function isPartOfInspector(obj)
-    local current = obj
-    while current do
-        if current == ScreenGui then return true end
-        current = current.Parent
-    end
-    return false
-end
-
-local function isPlayerChar(obj)
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p.Character and obj:IsDescendantOf(p.Character) then
-            return true
-        end
-    end
-    return false
-end
-
 -------------------------------------------------
--- DETECTION METHOD 1: Tên gợi ý
+-- 9 DETECTION METHODS
 -------------------------------------------------
 local NAME_KEYWORDS = {
-    -- Trực tiếp
-    high = {"crosshair", "reticle", "aimpoint", "gunsight"},
-    medium = {"aim", "cross", "sight", "scope", "cursor",
-              "target", "dot", "hair", "recticle", "xhair"},
-    low = {"center", "middle", "point", "marker", "indicator",
-           "hud_center", "weapon_ui"},
+    high   = {"crosshair","reticle","aimpoint","gunsight","xhair"},
+    medium = {"aim","cross","sight","scope","cursor","target","dot","hair"},
+    low    = {"center","middle","point","marker","indicator","hud"},
 }
 
 local function scoreByName(obj)
     local name = obj.Name:lower()
-    local score = 0
-    local reason = {}
+    local score, reasons = 0, {}
 
     for _, kw in ipairs(NAME_KEYWORDS.high) do
         if name:find(kw) then
-            score += 35
-            table.insert(reason, "Name chứa '" .. kw .. "' (+35)")
-            break
+            score += 35; table.insert(reasons, "Name='"..kw.."' +35"); break
         end
     end
     for _, kw in ipairs(NAME_KEYWORDS.medium) do
         if name:find(kw) then
-            score += 20
-            table.insert(reason, "Name chứa '" .. kw .. "' (+20)")
-            break
+            score += 20; table.insert(reasons, "Name='"..kw.."' +20"); break
         end
     end
     for _, kw in ipairs(NAME_KEYWORDS.low) do
         if name:find(kw) then
-            score += 10
-            table.insert(reason, "Name chứa '" .. kw .. "' (+10)")
-            break
+            score += 10; table.insert(reasons, "Name='"..kw.."' +10"); break
         end
     end
 
-    -- Kiểm tra parent names
-    local parent = obj.Parent
-    if parent and parent:IsA("GuiObject") then
-        local pname = parent.Name:lower()
+    -- Parent name
+    local p = obj.Parent
+    if p and p:IsA("GuiObject") then
+        local pn = p.Name:lower()
         for _, kw in ipairs(NAME_KEYWORDS.high) do
-            if pname:find(kw) then
-                score += 25
-                table.insert(reason, "Parent name '" .. kw .. "' (+25)")
-                break
+            if pn:find(kw) then
+                score += 25; table.insert(reasons, "Parent='"..kw.."' +25"); break
             end
         end
         for _, kw in ipairs(NAME_KEYWORDS.medium) do
-            if pname:find(kw) then
-                score += 15
-                table.insert(reason, "Parent name '" .. kw .. "' (+15)")
-                break
+            if pn:find(kw) then
+                score += 15; table.insert(reasons, "Parent='"..kw.."' +15"); break
             end
         end
     end
 
-    return score, reason
+    -- Grandparent
+    if p and p.Parent and p.Parent:IsA("GuiObject") then
+        local gn = p.Parent.Name:lower()
+        for _, kw in ipairs(NAME_KEYWORDS.high) do
+            if gn:find(kw) then
+                score += 15; table.insert(reasons, "Grandparent='"..kw.."' +15"); break
+            end
+        end
+    end
+
+    return score, reasons
 end
 
--------------------------------------------------
--- DETECTION METHOD 2: Vị trí (giữa màn hình)
--------------------------------------------------
 local function scoreByPosition(obj)
     local dist = distToCenter(obj)
-    local score = 0
-    local reason = {}
+    local score, reasons = 0, {}
 
     if dist < DETECT.CENTER_RADIUS_TIGHT then
         score += 30
-        table.insert(reason, string.format("Rất gần center (%.0fpx) (+30)", dist))
+        table.insert(reasons, string.format("Center %.0fpx +30", dist))
     elseif dist < DETECT.CENTER_RADIUS_MEDIUM then
         score += 20
-        table.insert(reason, string.format("Gần center (%.0fpx) (+20)", dist))
+        table.insert(reasons, string.format("Near center %.0fpx +20", dist))
     elseif dist < DETECT.CENTER_RADIUS_WIDE then
         score += 8
-        table.insert(reason, string.format("Vùng center (%.0fpx) (+8)", dist))
+        table.insert(reasons, string.format("Center area %.0fpx +8", dist))
     end
 
-    -- Bonus nếu AnchorPoint = (0.5, 0.5) VÀ Position scale ~0.5
     local pos = obj.Position
     if math.abs(pos.X.Scale - 0.5) < 0.05 and math.abs(pos.Y.Scale - 0.5) < 0.05 then
         score += 15
-        table.insert(reason, "Position Scale ≈ (0.5, 0.5) (+15)")
+        table.insert(reasons, "Scale≈0.5 +15")
     end
 
     local anchor = obj.AnchorPoint
     if math.abs(anchor.X - 0.5) < 0.1 and math.abs(anchor.Y - 0.5) < 0.1 then
         score += 5
-        table.insert(reason, "AnchorPoint ≈ (0.5, 0.5) (+5)")
+        table.insert(reasons, "Anchor≈0.5 +5")
     end
 
-    return score, reason
+    return score, reasons
 end
 
--------------------------------------------------
--- DETECTION METHOD 3: Kích thước (nhỏ)
--------------------------------------------------
 local function scoreBySize(obj)
     local s = obj.AbsoluteSize
-    local maxDim = math.max(s.X, s.Y)
-    local minDim = math.min(s.X, s.Y)
-    local score = 0
-    local reason = {}
+    local maxD = math.max(s.X, s.Y)
+    local minD = math.min(s.X, s.Y)
+    local score, reasons = 0, {}
 
-    if maxDim < 5 and maxDim >= 1 then
-        -- Dot crosshair (chấm nhỏ)
+    if maxD < 5 and maxD >= 1 then
         score += 25
-        table.insert(reason, string.format("Rất nhỏ (dot) %.0f×%.0f (+25)", s.X, s.Y))
-    elseif maxDim <= 50 then
+        table.insert(reasons, string.format("Dot %.0f×%.0f +25", s.X, s.Y))
+    elseif maxD <= 50 then
         score += 20
-        table.insert(reason, string.format("Nhỏ %.0f×%.0f (+20)", s.X, s.Y))
-    elseif maxDim <= DETECT.MAX_CROSSHAIR_SIZE then
+        table.insert(reasons, string.format("Small %.0f×%.0f +20", s.X, s.Y))
+    elseif maxD <= DETECT.MAX_CROSSHAIR_SIZE then
         score += 10
-        table.insert(reason, string.format("Vừa %.0f×%.0f (+10)", s.X, s.Y))
-    elseif maxDim > 200 then
+        table.insert(reasons, string.format("Medium %.0f×%.0f +10", s.X, s.Y))
+    elseif maxD > 200 then
         score -= 15
-        table.insert(reason, string.format("Quá lớn %.0f×%.0f (-15)", s.X, s.Y))
+        table.insert(reasons, string.format("Too big %.0f×%.0f -15", s.X, s.Y))
     end
 
-    -- Hình vuông hoặc gần vuông → có thể là dot/image crosshair
-    if maxDim > 0 and maxDim < 80 then
-        local ratio = minDim / maxDim
-        if ratio > 0.8 then
-            score += 5
-            table.insert(reason, "Gần vuông/tròn (+5)")
-        end
+    if maxD > 0 and maxD < 80 and minD/maxD > 0.8 then
+        score += 5
+        table.insert(reasons, "Square +5")
     end
 
-    -- Thanh mỏng (cross line)
-    if minDim <= DETECT.THIN_THRESHOLD and maxDim > 5 and maxDim < 80 then
+    if minD <= DETECT.THIN_THRESHOLD and maxD > 5 and maxD < 80 then
         score += 15
-        table.insert(reason, string.format("Thanh mỏng (cross line) %d×%d (+15)", s.X, s.Y))
+        table.insert(reasons, string.format("Thin bar %d×%d +15", s.X, s.Y))
     end
 
-    return score, reason
+    return score, reasons
 end
 
--------------------------------------------------
--- DETECTION METHOD 4: Cross Pattern (nhiều thanh)
--------------------------------------------------
-local function findCrossPattern(allObjs)
+local function scoreByImage(obj)
+    local score, reasons = 0, {}
+    if not (obj:IsA("ImageLabel") or obj:IsA("ImageButton")) then return score, reasons end
+
+    local img = obj.Image:lower()
+    if img == "" then return score, reasons end
+
+    local imgKW = {"crosshair","reticle","aim","scope","dot","target","sight","cursor","xhair"}
+    for _, kw in ipairs(imgKW) do
+        if img:find(kw) then
+            score += 25; table.insert(reasons, "Image='"..kw.."' +25"); break
+        end
+    end
+
+    if img:find("rbxassetid") and distToCenter(obj) < DETECT.CENTER_RADIUS_MEDIUM then
+        local s = obj.AbsoluteSize
+        if math.max(s.X, s.Y) < DETECT.MAX_CROSSHAIR_SIZE then
+            score += 10; table.insert(reasons, "Asset@center +10")
+        end
+    end
+
+    return score, reasons
+end
+
+local function scoreByAppearance(obj)
+    local score, reasons = 0, {}
+
+    if obj.BackgroundTransparency >= 0.9 and distToCenter(obj) < DETECT.CENTER_RADIUS_MEDIUM then
+        local s = obj.AbsoluteSize
+        if math.max(s.X, s.Y) < DETECT.MAX_CROSSHAIR_SIZE then
+            score += 5; table.insert(reasons, "Transparent@center +5")
+        end
+    end
+
+    if obj.BackgroundTransparency < 0.5 then
+        local c = obj.BackgroundColor3
+        if c.R > 0.9 and c.G > 0.9 and c.B > 0.9 then
+            score += 3; table.insert(reasons, "White +3")
+        elseif c.R > 0.8 and c.G < 0.3 then
+            score += 3; table.insert(reasons, "Red +3")
+        elseif c.G > 0.8 and c.R < 0.3 then
+            score += 3; table.insert(reasons, "Green +3")
+        end
+    end
+
+    return score, reasons
+end
+
+local function scoreByLayer(obj)
+    local score, reasons = 0, {}
+
+    if obj.ZIndex >= 10 then
+        score += 5; table.insert(reasons, "ZIndex="..obj.ZIndex.." +5")
+    end
+
+    local sg = obj:FindFirstAncestorOfClass("ScreenGui")
+    if sg and sg.DisplayOrder >= 5 then
+        score += 3; table.insert(reasons, "DisplayOrder="..sg.DisplayOrder.." +3")
+    end
+
+    if #obj:GetChildren() <= 1 then
+        score += 3; table.insert(reasons, "Leaf node +3")
+    end
+
+    return score, reasons
+end
+
+-- Cross pattern
+local function findCrossPatterns(allObjs)
     local center = getScreenCenter()
     local patterns = {}
-
-    -- Tìm các thanh mỏng gần center
-    local horizontalBars = {}
-    local verticalBars   = {}
+    local hBars, vBars = {}, {}
 
     for _, obj in ipairs(allObjs) do
         local s = obj.AbsoluteSize
-        local c = getAbsCenter(obj)
-        local distC = (c - center).Magnitude
+        local d = (getAbsCenter(obj) - center).Magnitude
 
-        if distC < DETECT.CENTER_RADIUS_MEDIUM then
+        if d < DETECT.CENTER_RADIUS_MEDIUM then
             if s.X > s.Y * 2 and s.Y <= DETECT.THIN_THRESHOLD and s.X < 100 then
-                table.insert(horizontalBars, obj)
+                table.insert(hBars, obj)
             end
             if s.Y > s.X * 2 and s.X <= DETECT.THIN_THRESHOLD and s.Y < 100 then
-                table.insert(verticalBars, obj)
+                table.insert(vBars, obj)
             end
         end
     end
 
-    -- Kiểm tra xem có cặp ngang + dọc không
-    for _, hBar in ipairs(horizontalBars) do
-        for _, vBar in ipairs(verticalBars) do
-            local hCenter = getAbsCenter(hBar)
-            local vCenter = getAbsCenter(vBar)
-            local gap = (hCenter - vCenter).Magnitude
-
+    for _, h in ipairs(hBars) do
+        for _, v in ipairs(vBars) do
+            local gap = (getAbsCenter(h) - getAbsCenter(v)).Magnitude
             if gap < DETECT.CROSS_GAP_TOLERANCE then
-                table.insert(patterns, {
-                    horizontal = hBar,
-                    vertical   = vBar,
-                    gap        = gap,
-                    center     = (hCenter + vCenter) / 2,
-                })
-            end
-        end
-    end
-
-    -- Tìm pattern 4 thanh (trên/dưới/trái/phải)
-    -- Nhiều game dùng 4 Frame nhỏ thay vì 2
-    local nearCenter = {}
-    for _, obj in ipairs(allObjs) do
-        local s = obj.AbsoluteSize
-        local c = getAbsCenter(obj)
-        local distC = (c - center).Magnitude
-        local maxD = math.max(s.X, s.Y)
-        local minD = math.min(s.X, s.Y)
-
-        if distC < DETECT.CENTER_RADIUS_MEDIUM and minD <= 6 and maxD < 50 and maxD > 3 then
-            table.insert(nearCenter, {obj = obj, center = c, size = s})
-        end
-    end
-
-    if #nearCenter >= 4 then
-        -- Tìm nhóm 4 thanh đối xứng
-        for i = 1, #nearCenter do
-            local group = {nearCenter[i]}
-            local ref = nearCenter[i].center
-
-            for j = 1, #nearCenter do
-                if i ~= j then
-                    local d = (nearCenter[j].center - ref).Magnitude
-                    if d < 60 then
-                        table.insert(group, nearCenter[j])
-                    end
-                end
-            end
-
-            if #group >= 4 then
-                table.insert(patterns, {
-                    type   = "4-line cross",
-                    parts  = group,
-                    count  = #group,
-                })
+                table.insert(patterns, {h = h, v = v, gap = gap})
             end
         end
     end
@@ -408,163 +529,60 @@ local function findCrossPattern(allObjs)
     return patterns
 end
 
--------------------------------------------------
--- DETECTION METHOD 5: Image crosshair
--------------------------------------------------
-local KNOWN_CROSSHAIR_IMAGES = {
-    "crosshair", "reticle", "aim", "scope",
-    "dot", "target", "sight", "cursor",
-    "xhair", "cross_hair",
-}
+-- Tracking
+local trackData = {}
 
-local function scoreByImage(obj)
-    local score = 0
-    local reason = {}
+local function scoreByTracking(obj)
+    local key = obj:GetFullName()
+    local score, reasons = 0, {}
 
-    if not (obj:IsA("ImageLabel") or obj:IsA("ImageButton")) then
-        return score, reason
+    if not trackData[key] then
+        trackData[key] = {center = 0, total = 0}
     end
 
-    local img = obj.Image:lower()
-    if img == "" then return score, reason end
-
-    -- Kiểm tra tên image asset
-    for _, kw in ipairs(KNOWN_CROSSHAIR_IMAGES) do
-        if img:find(kw) then
-            score += 25
-            table.insert(reason, "Image chứa '" .. kw .. "' (+25)")
-            break
-        end
+    local d = trackData[key]
+    d.total += 1
+    if distToCenter(obj) < DETECT.CENTER_RADIUS_MEDIUM then
+        d.center += 1
     end
 
-    -- rbxassetid nhỏ + ở center → có thể
-    if img:find("rbxassetid") and distToCenter(obj) < DETECT.CENTER_RADIUS_MEDIUM then
-        local s = obj.AbsoluteSize
-        if math.max(s.X, s.Y) < DETECT.MAX_CROSSHAIR_SIZE then
+    if d.total >= 3 then
+        local ratio = d.center / d.total
+        if ratio > 0.9 then
+            score += 20
+            table.insert(reasons, string.format("Always center %.0f%% +20", ratio*100))
+        elseif ratio > 0.7 then
             score += 10
-            table.insert(reason, "Image asset nhỏ ở center (+10)")
+            table.insert(reasons, string.format("Often center %.0f%% +10", ratio*100))
         end
     end
 
-    -- ImageTransparency thấp (đang hiện)
-    if obj.ImageTransparency < 0.5 then
-        score += 3
-        table.insert(reason, "Image visible (+3)")
-    end
-
-    return score, reason
+    return score, reasons
 end
 
--------------------------------------------------
--- DETECTION METHOD 6: Transparency & Color
--------------------------------------------------
-local function scoreByAppearance(obj)
-    local score = 0
-    local reason = {}
-
-    -- Background transparency cao + ở center = overlay element
-    if obj.BackgroundTransparency >= 0.9 then
-        if distToCenter(obj) < DETECT.CENTER_RADIUS_MEDIUM then
-            local s = obj.AbsoluteSize
-            if math.max(s.X, s.Y) < DETECT.MAX_CROSSHAIR_SIZE then
-                score += 5
-                table.insert(reason, "Transparent overlay ở center (+5)")
-            end
-        end
-    end
-
-    -- Crosshair thường có màu trắng, đỏ, xanh lá, hoặc vàng
-    local c = obj.BackgroundColor3
-    local r, g, b = c.R, c.G, c.B
-    if obj.BackgroundTransparency < 0.5 then
-        -- Trắng
-        if r > 0.9 and g > 0.9 and b > 0.9 then
-            score += 3
-            table.insert(reason, "Màu trắng (+3)")
-        end
-        -- Đỏ
-        if r > 0.8 and g < 0.3 and b < 0.3 then
-            score += 3
-            table.insert(reason, "Màu đỏ (+3)")
-        end
-        -- Xanh lá
-        if g > 0.8 and r < 0.3 and b < 0.3 then
-            score += 3
-            table.insert(reason, "Màu xanh lá (+3)")
-        end
-    end
-
-    return score, reason
-end
-
--------------------------------------------------
--- DETECTION METHOD 7: ZIndex & Hierarchy
--------------------------------------------------
-local function scoreByLayer(obj)
-    local score = 0
-    local reason = {}
-
-    -- ZIndex cao → overlay, có thể là HUD
-    if obj.ZIndex >= 10 then
-        score += 5
-        table.insert(reason, string.format("ZIndex cao (%d) (+5)", obj.ZIndex))
-    end
-
-    -- Nằm trong ScreenGui có DisplayOrder cao
-    local sg = obj:FindFirstAncestorOfClass("ScreenGui")
-    if sg and sg.DisplayOrder >= 5 then
-        score += 3
-        table.insert(reason, string.format("ScreenGui DisplayOrder %d (+3)", sg.DisplayOrder))
-    end
-
-    -- Ít children → element cuối, không phải container
-    if #obj:GetChildren() <= 1 then
-        score += 3
-        table.insert(reason, "Ít children (leaf node) (+3)")
-    end
-
-    return score, reason
-end
-
--------------------------------------------------
--- DETECTION METHOD 8: Mouse Icon
--------------------------------------------------
-local function detectMouseIcon()
+-- Mouse detection
+local function detectMouse()
     local results = {}
 
-    -- Check Mouse.Icon
-    local mouseIcon = Mouse.Icon
-    if mouseIcon and mouseIcon ~= "" then
+    if Mouse.Icon ~= "" then
         table.insert(results, {
-            method = "Mouse.Icon",
-            value  = mouseIcon,
-            note   = "Game đã thay đổi icon chuột"
+            info = "🖱️ Mouse.Icon = " .. Mouse.Icon,
+            note = "Custom cursor"
         })
     end
 
-    -- Check UserInputService.MouseIcon
-    local uisIcon = UserInputService.MouseIconEnabled
-    if not uisIcon then
+    if not UserInputService.MouseIconEnabled then
         table.insert(results, {
-            method = "MouseIcon Disabled",
-            value  = "UserInputService.MouseIconEnabled = false",
-            note   = "Game đã ẩn chuột → dùng custom crosshair"
+            info = "🖱️ Mouse HIDDEN",
+            note = "Ẩn chuột → chắc có custom crosshair"
         })
     end
 
-    -- Check MouseBehavior
     local mb = UserInputService.MouseBehavior
     if mb == Enum.MouseBehavior.LockCenter then
         table.insert(results, {
-            method = "MouseBehavior",
-            value  = "LockCenter",
-            note   = "Chuột bị khóa giữa → FPS mode, chắc chắn có crosshair"
-        })
-    elseif mb == Enum.MouseBehavior.LockCurrentPosition then
-        table.insert(results, {
-            method = "MouseBehavior",
-            value  = "LockCurrentPosition",
-            note   = "Chuột bị khóa vị trí"
+            info = "🖱️ Mouse LOCKED CENTER",
+            note = "FPS mode → crosshair"
         })
     end
 
@@ -572,88 +590,11 @@ local function detectMouseIcon()
 end
 
 -------------------------------------------------
--- DETECTION METHOD 9: Tracking qua thời gian
+-- MASTER ANALYZE
 -------------------------------------------------
-local trackingData = {} -- obj → {positions over time}
-
-local function trackElement(obj)
-    local key = obj:GetFullName()
-    if not trackingData[key] then
-        trackingData[key] = {
-            positions = {},
-            stayedCenter = 0,
-            totalChecks  = 0,
-        }
-    end
-
-    local data = trackingData[key]
-    local c = getAbsCenter(obj)
-    table.insert(data.positions, c)
-    if #data.positions > 20 then
-        table.remove(data.positions, 1)
-    end
-
-    data.totalChecks += 1
-    if distToCenter(obj) < DETECT.CENTER_RADIUS_MEDIUM then
-        data.stayedCenter += 1
-    end
-
-    return data
-end
-
-local function scoreByTracking(obj)
-    local score = 0
-    local reason = {}
-    local key = obj:GetFullName()
-    local data = trackingData[key]
-
-    if not data or data.totalChecks < 3 then
-        return score, reason
-    end
-
-    -- Luôn ở center qua nhiều frame
-    local centerRatio = data.stayedCenter / data.totalChecks
-    if centerRatio > 0.9 and data.totalChecks >= 5 then
-        score += 20
-        table.insert(reason, string.format(
-            "Luôn ở center %.0f%% of %d checks (+20)",
-            centerRatio * 100, data.totalChecks
-        ))
-    elseif centerRatio > 0.7 then
-        score += 10
-        table.insert(reason, string.format(
-            "Thường ở center %.0f%% (+10)", centerRatio * 100
-        ))
-    end
-
-    -- Kiểm tra có di chuyển không (crosshair thường đứng yên tại center)
-    if #data.positions >= 3 then
-        local totalMovement = 0
-        for i = 2, #data.positions do
-            totalMovement += (data.positions[i] - data.positions[i-1]).Magnitude
-        end
-        local avgMovement = totalMovement / (#data.positions - 1)
-
-        if avgMovement < 2 then
-            score += 8
-            table.insert(reason, string.format(
-                "Rất ít di chuyển (avg %.1fpx) (+8)", avgMovement
-            ))
-        end
-    end
-
-    return score, reason
-end
-
--------------------------------------------------
--- MASTER ANALYSIS
--------------------------------------------------
-local function analyzeAll()
-    local center = getScreenCenter()
+local function analyze()
     local allVisible = {}
-    local candidates = {}
 
-    -- Thu thập tất cả visible GUI objects
     for _, sg in ipairs(PlayerGui:GetChildren()) do
         if sg:IsA("ScreenGui") and sg ~= ScreenGui and sg.Enabled then
             for _, obj in ipairs(sg:GetDescendants()) do
@@ -664,423 +605,365 @@ local function analyzeAll()
         end
     end
 
-    -- Cross pattern detection
-    local crossPatterns = findCrossPattern(allVisible)
+    local patterns = findCrossPatterns(allVisible)
+    local candidates = {}
 
-    -- Phân tích từng element
+    -- Map pattern objects
+    local patternObjs = {}
+    for _, p in ipairs(patterns) do
+        patternObjs[p.h] = true
+        patternObjs[p.v] = true
+    end
+
     for _, obj in ipairs(allVisible) do
         local totalScore = 0
         local allReasons = {}
         local methods    = {}
 
-        -- Method 1: Name
-        local s1, r1 = scoreByName(obj)
-        totalScore += s1
-        if s1 > 0 then
-            table.insert(methods, "📛 Name")
-            for _, r in ipairs(r1) do table.insert(allReasons, r) end
-        end
+        local scoreFuncs = {
+            {"📛", scoreByName},
+            {"📍", scoreByPosition},
+            {"📏", scoreBySize},
+            {"🖼️", scoreByImage},
+            {"🎨", scoreByAppearance},
+            {"📊", scoreByLayer},
+            {"⏱️", scoreByTracking},
+        }
 
-        -- Method 2: Position
-        local s2, r2 = scoreByPosition(obj)
-        totalScore += s2
-        if s2 > 0 then
-            table.insert(methods, "📍 Position")
-            for _, r in ipairs(r2) do table.insert(allReasons, r) end
-        end
-
-        -- Method 3: Size
-        local s3, r3 = scoreBySize(obj)
-        totalScore += s3
-        if s3 > 0 then
-            table.insert(methods, "📏 Size")
-            for _, r in ipairs(r3) do table.insert(allReasons, r) end
-        end
-        if s3 < 0 then
-            totalScore += s3
-            for _, r in ipairs(r3) do table.insert(allReasons, r) end
-        end
-
-        -- Method 4: Image
-        local s4, r4 = scoreByImage(obj)
-        totalScore += s4
-        if s4 > 0 then
-            table.insert(methods, "🖼️ Image")
-            for _, r in ipairs(r4) do table.insert(allReasons, r) end
-        end
-
-        -- Method 5: Appearance
-        local s5, r5 = scoreByAppearance(obj)
-        totalScore += s5
-        if s5 > 0 then
-            table.insert(methods, "🎨 Look")
-            for _, r in ipairs(r5) do table.insert(allReasons, r) end
-        end
-
-        -- Method 6: Layer
-        local s6, r6 = scoreByLayer(obj)
-        totalScore += s6
-        if s6 > 0 then
-            table.insert(methods, "📊 Layer")
-            for _, r in ipairs(r6) do table.insert(allReasons, r) end
-        end
-
-        -- Method 7: Tracking
-        trackElement(obj)
-        local s7, r7 = scoreByTracking(obj)
-        totalScore += s7
-        if s7 > 0 then
-            table.insert(methods, "⏱️ Track")
-            for _, r in ipairs(r7) do table.insert(allReasons, r) end
-        end
-
-        -- Cross pattern bonus
-        for _, pattern in ipairs(crossPatterns) do
-            if pattern.horizontal == obj or pattern.vertical == obj then
-                totalScore += 30
-                table.insert(allReasons, "Là một phần của cross pattern (+30)")
-                table.insert(methods, "✚ Cross")
-            end
-            if pattern.parts then
-                for _, p in ipairs(pattern.parts) do
-                    if p.obj == obj then
-                        totalScore += 25
-                        table.insert(allReasons, "Thuộc 4-line cross pattern (+25)")
-                        table.insert(methods, "✚ Cross4")
-                    end
+        for _, sf in ipairs(scoreFuncs) do
+            local s, r = sf[2](obj)
+            totalScore += s
+            if s ~= 0 then
+                table.insert(methods, sf[1])
+                for _, reason in ipairs(r) do
+                    table.insert(allReasons, reason)
                 end
             end
         end
 
-        -- Chỉ lưu nếu có score
+        -- Cross pattern bonus
+        if patternObjs[obj] then
+            totalScore += 30
+            table.insert(allReasons, "Cross pattern member +30")
+            table.insert(methods, "✚")
+        end
+
         if totalScore >= 15 then
             table.insert(candidates, {
-                obj        = obj,
-                score      = totalScore,
-                reasons    = allReasons,
-                methods    = methods,
-                dist       = distToCenter(obj),
-                absPos     = obj.AbsolutePosition,
-                absSize    = obj.AbsoluteSize,
-                path       = obj:GetFullName(),
+                obj     = obj,
+                score   = totalScore,
+                reasons = allReasons,
+                methods = methods,
+                dist    = distToCenter(obj),
             })
         end
     end
 
-    -- Sort theo score giảm dần
     table.sort(candidates, function(a, b) return a.score > b.score end)
 
-    return candidates, crossPatterns, allVisible
+    return candidates, patterns, allVisible, detectMouse()
+end
+
+-------------------------------------------------
+-- HIGHLIGHT
+-------------------------------------------------
+local highlights = {}
+
+local function clearHighlights()
+    for _, h in ipairs(highlights) do
+        if h and h.Parent then h:Destroy() end
+    end
+    table.clear(highlights)
+end
+
+local function highlight(obj, color)
+    pcall(function()
+        local f = Instance.new("Frame")
+        f.Name                  = "_CH_Highlight"
+        f.Size                  = UDim2.new(1, 6, 1, 6)
+        f.Position              = UDim2.new(0, -3, 0, -3)
+        f.BackgroundTransparency = 1
+        f.ZIndex                = 99999
+        f.Parent                = obj
+
+        local s = Instance.new("UIStroke", f)
+        s.Color = color; s.Thickness = 2
+
+        task.spawn(function()
+            while f.Parent do
+                s.Transparency = 0; task.wait(0.3)
+                if not f.Parent then break end
+                s.Transparency = 0.7; task.wait(0.3)
+            end
+        end)
+
+        table.insert(highlights, f)
+    end)
 end
 
 -------------------------------------------------
 -- RENDER
 -------------------------------------------------
 local activeEntries = {}
-local highlightFrames = {}
 
-local function clearAll()
+local function clearEntries()
     for _, e in ipairs(activeEntries) do e:Destroy() end
     table.clear(activeEntries)
-    for _, h in ipairs(highlightFrames) do
-        if h.Parent then h:Destroy() end
-    end
-    table.clear(highlightFrames)
 end
 
-local function addHighlight(obj, color)
-    pcall(function()
-        local h = Instance.new("Frame")
-        h.Name                  = "_CrosshairHighlight"
-        h.Size                  = UDim2.new(1, 6, 1, 6)
-        h.Position              = UDim2.new(0, -3, 0, -3)
-        h.BackgroundTransparency = 1
-        h.ZIndex                = 99999
-        h.Parent                = obj
+local function makeCard(order, text, bgColor)
+    local card = Instance.new("TextLabel")
+    card.Size                  = UDim2.new(1, -S(4), 0, 0)
+    card.AutomaticSize         = Enum.AutomaticSize.Y
+    card.BackgroundColor3      = bgColor or Color3.fromRGB(25, 25, 40)
+    card.BackgroundTransparency = 0.15
+    card.TextColor3            = Color3.fromRGB(220, 220, 220)
+    card.Font                  = Enum.Font.RobotoMono
+    card.TextSize              = S(12)
+    card.TextXAlignment        = Enum.TextXAlignment.Left
+    card.TextYAlignment        = Enum.TextYAlignment.Top
+    card.TextWrapped           = true
+    card.RichText              = true
+    card.LayoutOrder           = order
+    card.Text                  = text
+    card.BorderSizePixel       = 0
+    card.ZIndex                = 51
+    card.Parent                = Scroll
+    Instance.new("UICorner", card).CornerRadius = UDim.new(0, S(8))
 
-        local s = Instance.new("UIStroke", h)
-        s.Color     = color
-        s.Thickness = 2
+    local pad = Instance.new("UIPadding", card)
+    pad.PaddingLeft   = UDim.new(0, S(10))
+    pad.PaddingRight  = UDim.new(0, S(10))
+    pad.PaddingTop    = UDim.new(0, S(8))
+    pad.PaddingBottom = UDim.new(0, S(8))
 
-        -- Nhấp nháy
-        task.spawn(function()
-            while h.Parent do
-                s.Transparency = 0
-                task.wait(0.4)
-                if not h.Parent then break end
-                s.Transparency = 0.6
-                task.wait(0.4)
-            end
-        end)
-
-        table.insert(highlightFrames, h)
-    end)
+    table.insert(activeEntries, card)
+    return card
 end
 
-local function createEntry(parent, order, text, bgColor)
-    local e = Instance.new("TextLabel")
-    e.Size                  = UDim2.new(1, -6, 0, 0)
-    e.AutomaticSize         = Enum.AutomaticSize.Y
-    e.BackgroundColor3      = bgColor or Color3.fromRGB(25, 25, 40)
-    e.BackgroundTransparency = 0.2
-    e.TextColor3            = Color3.fromRGB(220, 220, 220)
-    e.Font                  = Enum.Font.RobotoMono
-    e.TextSize              = 12
-    e.TextXAlignment        = Enum.TextXAlignment.Left
-    e.TextYAlignment        = Enum.TextYAlignment.Top
-    e.TextWrapped           = true
-    e.RichText              = true
-    e.LayoutOrder           = order
-    e.Text                  = text
-    e.BorderSizePixel       = 0
-    e.Parent                = parent
-    Instance.new("UICorner", e).CornerRadius = UDim.new(0, 6)
-    local pad = Instance.new("UIPadding", e)
-    pad.PaddingLeft   = UDim.new(0, 8)
-    pad.PaddingRight  = UDim.new(0, 8)
-    pad.PaddingTop    = UDim.new(0, 6)
-    pad.PaddingBottom = UDim.new(0, 6)
-    table.insert(activeEntries, e)
-    return e
-end
-
-local function getConfidenceLabel(score)
+local function getConfLabel(score)
     if score >= 80 then
         return '<font color="#FF0000"><b>🔴 CHẮC CHẮN CROSSHAIR</b></font>'
     elseif score >= 60 then
-        return '<font color="#FF8800"><b>🟠 RẤT CÓ THỂ LÀ CROSSHAIR</b></font>'
+        return '<font color="#FF8800"><b>🟠 RẤT CÓ THỂ</b></font>'
     elseif score >= 40 then
-        return '<font color="#FFDD00"><b>🟡 KHẢ NĂNG LÀ CROSSHAIR</b></font>'
+        return '<font color="#FFDD00"><b>🟡 KHẢ NĂNG CAO</b></font>'
     elseif score >= 25 then
-        return '<font color="#88CCFF">🔵 Có thể liên quan</font>'
+        return '<font color="#88CCFF">🔵 Có thể</font>'
     else
-        return '<font color="#888888">⚪ Ít khả năng</font>'
+        return '<font color="#888888">⚪ Thấp</font>'
     end
 end
 
 local function render()
-    clearAll()
+    clearEntries()
+    clearHighlights()
 
-    local candidates, patterns, allVisible = analyzeAll()
-    local mouseInfo = detectMouseIcon()
+    local candidates, patterns, allVisible, mouseInfo = analyze()
+    local viewport = Camera.ViewportSize
 
-    -- Stats
-    local statsLines = {}
-    table.insert(statsLines, string.format(
-        '<font color="#00C8FF">Scanned:</font> %d elements  |  '..
-        '<font color="#FF4444">Candidates:</font> %d  |  '..
-        '<font color="#FFAA00">Cross Patterns:</font> %d',
-        #allVisible, #candidates, #patterns
-    ))
-
-    -- Mouse info
-    for _, m in ipairs(mouseInfo) do
-        table.insert(statsLines, string.format(
-            '<font color="#FF88FF">%s:</font> %s — <i>%s</i>',
-            m.method, m.value, m.note
-        ))
-    end
-
-    StatsLabel.Text = table.concat(statsLines, "\n")
+    -- Info bar
+    InfoBar.Text = string.format(
+        '<font color="#00C8FF">📱 %s</font>  |  ' ..
+        '<font color="#AAAAAA">Screen: %.0f×%.0f  Scale: %.0f%%</font>\n' ..
+        '<font color="#FF4444">Found: %d candidates</font>  |  ' ..
+        '<font color="#FFAA00">Cross patterns: %d</font>  |  ' ..
+        '<font color="#888888">Total UI: %d</font>',
+        DEVICE_NAME, viewport.X, viewport.Y, UI_SCALE * 100,
+        #candidates, #patterns, #allVisible
+    )
 
     local order = 0
 
-    -- Nếu phát hiện mouse bị ẩn/khóa
+    -- Mouse info
     if #mouseInfo > 0 then
         order += 1
-        local mouseText = '<font color="#FF88FF"><b>━━━ 🖱️ MOUSE/CURSOR INFO ━━━</b></font>\n'
+        local mText = '<font color="#FF88FF"><b>🖱️ MOUSE / CURSOR</b></font>\n'
         for _, m in ipairs(mouseInfo) do
-            mouseText ..= string.format(
-                '<font color="#FFAAFF">%s:</font> %s\n  → %s\n',
-                m.method, m.value, m.note
+            mText ..= string.format(
+                '<font color="#FFAAFF">%s</font>\n  → <i>%s</i>\n',
+                m.info, m.note
             )
         end
-        createEntry(Scroll, order, mouseText, Color3.fromRGB(40, 20, 40))
+        makeCard(order, mText, Color3.fromRGB(35, 15, 35))
     end
 
-    -- Crosshair candidates
+    -- Candidates
     if #candidates > 0 then
         order += 1
-        createEntry(Scroll, order,
-            '<font color="#FF4444"><b>━━━ 🎯 CROSSHAIR CANDIDATES (sorted by confidence) ━━━</b></font>',
-            Color3.fromRGB(40, 15, 15)
+        makeCard(order,
+            '<font color="#FF4444"><b>━━ 🎯 CROSSHAIR CANDIDATES ━━</b></font>',
+            Color3.fromRGB(40, 10, 10)
         )
 
-        for idx, cand in ipairs(candidates) do
-            if idx > 30 then break end
+        for idx, c in ipairs(candidates) do
+            if idx > 20 then break end
             order += 1
+
+            local obj = c.obj
+            local pos = obj.Position
+            local siz = obj.Size
 
             local lines = {}
 
-            -- Confidence + methods used
+            -- Header
             table.insert(lines, string.format(
-                '%s  Score: <font color="#FFFFFF"><b>%d</b></font>',
-                getConfidenceLabel(cand.score), cand.score
-            ))
-            table.insert(lines, string.format(
-                '<font color="#AAAAAA">Detection methods:</font> %s',
-                table.concat(cand.methods, " + ")
+                '%s  Score: <b>%d</b>',
+                getConfLabel(c.score), c.score
             ))
 
-            -- Object info
+            -- Methods
             table.insert(lines, string.format(
-                '<font color="#FFD700">Name:</font> %s  <font color="#AAAAAA">[%s]</font>',
-                cand.obj.Name, cand.obj.ClassName
+                '<font color="#AAAAAA">Methods:</font> %s',
+                table.concat(c.methods, " ")
             ))
 
-            -- Position & Size
-            local pos = cand.obj.Position
-            local siz = cand.obj.Size
+            -- Name + Class
             table.insert(lines, string.format(
-                '<font color="#88CCFF">Position:</font> Scale(%.3f, %.3f) Offset(%d, %d)',
-                pos.X.Scale, pos.Y.Scale, pos.X.Offset, pos.Y.Offset
+                '<font color="#FFD700">%s</font> <font color="#777">[%s]</font>',
+                obj.Name, obj.ClassName
+            ))
+
+            -- ═══ OFFSET INFO (quan trọng nhất) ═══
+            table.insert(lines, "")
+            table.insert(lines, '<font color="#00DDFF"><b>📐 OFFSET & POSITION:</b></font>')
+
+            table.insert(lines, string.format(
+                '  <font color="#88CCFF">Position.X:</font> Scale=<b>%.3f</b>  Offset=<b>%d</b>',
+                pos.X.Scale, pos.X.Offset
             ))
             table.insert(lines, string.format(
-                '<font color="#88FFCC">Size:</font> Scale(%.3f, %.3f) Offset(%d, %d)',
-                siz.X.Scale, siz.Y.Scale, siz.X.Offset, siz.Y.Offset
+                '  <font color="#88CCFF">Position.Y:</font> Scale=<b>%.3f</b>  Offset=<b>%d</b>',
+                pos.Y.Scale, pos.Y.Offset
             ))
             table.insert(lines, string.format(
-                '<font color="#FFAA44">Absolute:</font> Pos(%.0f,%.0f) Size(%.0f,%.0f)  '..
+                '  <font color="#88FFCC">Size.X:</font> Scale=<b>%.3f</b>  Offset=<b>%d</b>',
+                siz.X.Scale, siz.X.Offset
+            ))
+            table.insert(lines, string.format(
+                '  <font color="#88FFCC">Size.Y:</font> Scale=<b>%.3f</b>  Offset=<b>%d</b>',
+                siz.Y.Scale, siz.Y.Offset
+            ))
+
+            table.insert(lines, "")
+            table.insert(lines, string.format(
+                '<font color="#FFAA44">Pixel:</font> Pos(%.0f, %.0f)  Size(%.0f, %.0f)',
+                obj.AbsolutePosition.X, obj.AbsolutePosition.Y,
+                obj.AbsoluteSize.X, obj.AbsoluteSize.Y
+            ))
+            table.insert(lines, string.format(
+                '<font color="#FFAA44">Anchor:</font> (%.1f, %.1f)  '..
                 '<font color="#FFAA44">Dist→Center:</font> %.1fpx',
-                cand.absPos.X, cand.absPos.Y,
-                cand.absSize.X, cand.absSize.Y,
-                cand.dist
+                obj.AnchorPoint.X, obj.AnchorPoint.Y, c.dist
             ))
 
-            -- Anchor, ZIndex
-            local anchor = cand.obj.AnchorPoint
+            -- Extra info
             table.insert(lines, string.format(
-                '<font color="#AAAAAA">Anchor:</font> (%.1f,%.1f)  '..
-                '<font color="#AAAAAA">ZIndex:</font> %d  '..
-                '<font color="#AAAAAA">Rotation:</font> %.1f°  '..
-                '<font color="#AAAAAA">BgTransp:</font> %.2f',
-                anchor.X, anchor.Y,
-                cand.obj.ZIndex,
-                cand.obj.Rotation,
-                cand.obj.BackgroundTransparency
+                '<font color="#888">ZIndex: %d  Rotation: %.1f°  Transp: %.2f</font>',
+                obj.ZIndex, obj.Rotation, obj.BackgroundTransparency
             ))
 
-            -- Image nếu có
-            if cand.obj:IsA("ImageLabel") or cand.obj:IsA("ImageButton") then
-                local img = cand.obj.Image
-                if img ~= "" then
-                    table.insert(lines, string.format(
-                        '<font color="#AA88FF">Image:</font> %s', img
-                    ))
-                end
+            if obj.BackgroundTransparency < 1 then
+                local bg = obj.BackgroundColor3
+                table.insert(lines, string.format(
+                    '<font color="#888">BgColor: (%d,%d,%d)</font>',
+                    bg.R*255, bg.G*255, bg.B*255
+                ))
             end
 
-            -- Text nếu có
-            if (cand.obj:IsA("TextLabel") or cand.obj:IsA("TextButton")) then
-                local txt = cand.obj.Text
-                if txt ~= "" then
-                    txt = txt:sub(1, 40):gsub("<", "&lt;"):gsub(">", "&gt;")
-                    table.insert(lines, string.format(
-                        '<font color="#FFFFFF">Text:</font> "%s"', txt
-                    ))
-                end
+            if (obj:IsA("ImageLabel") or obj:IsA("ImageButton")) and obj.Image ~= "" then
+                table.insert(lines, string.format(
+                    '<font color="#AA88FF">Image: %s</font>', obj.Image
+                ))
+            end
+
+            if (obj:IsA("TextLabel") or obj:IsA("TextButton")) and obj.Text ~= "" then
+                local t = obj.Text:sub(1,30):gsub("<","&lt;"):gsub(">","&gt;")
+                table.insert(lines, string.format(
+                    '<font color="#FFF">Text: "%s"</font>', t
+                ))
             end
 
             -- Reasons
-            table.insert(lines, '<font color="#666666">Lý do phát hiện:</font>')
-            for _, reason in ipairs(cand.reasons) do
-                table.insert(lines, '  <font color="#888888">• ' .. reason .. '</font>')
+            table.insert(lines, "")
+            table.insert(lines, '<font color="#666">Phát hiện bởi:</font>')
+            for _, r in ipairs(c.reasons) do
+                table.insert(lines, '<font color="#777">  • '..r..'</font>')
             end
 
             -- Path
-            table.insert(lines, string.format(
-                '<font color="#555555">Path: %s</font>', cand.path
-            ))
+            table.insert(lines, '<font color="#444">'..obj:GetFullName()..'</font>')
 
-            -- Chọn màu background theo score
-            local bgColor
-            if cand.score >= 80 then
-                bgColor = Color3.fromRGB(50, 15, 15)
-            elseif cand.score >= 60 then
-                bgColor = Color3.fromRGB(45, 30, 10)
-            elseif cand.score >= 40 then
-                bgColor = Color3.fromRGB(40, 40, 10)
-            else
-                bgColor = Color3.fromRGB(25, 25, 40)
-            end
+            -- Background color by confidence
+            local bgC
+            if c.score >= 80 then bgC = Color3.fromRGB(50, 12, 12)
+            elseif c.score >= 60 then bgC = Color3.fromRGB(45, 28, 8)
+            elseif c.score >= 40 then bgC = Color3.fromRGB(40, 38, 8)
+            else bgC = Color3.fromRGB(22, 22, 38) end
 
-            createEntry(Scroll, order, table.concat(lines, "\n"), bgColor)
+            makeCard(order, table.concat(lines, "\n"), bgC)
 
-            -- Highlight trên màn hình
-            if cand.score >= DETECT.MIN_CONFIDENCE then
-                local hColor
-                if cand.score >= 80 then
-                    hColor = Color3.fromRGB(255, 0, 0)
-                elseif cand.score >= 60 then
-                    hColor = Color3.fromRGB(255, 140, 0)
-                else
-                    hColor = Color3.fromRGB(255, 255, 0)
-                end
-                addHighlight(cand.obj, hColor)
+            -- Highlight
+            if c.score >= DETECT.MIN_CONFIDENCE then
+                local hCol
+                if c.score >= 80 then hCol = Color3.fromRGB(255,0,0)
+                elseif c.score >= 60 then hCol = Color3.fromRGB(255,140,0)
+                else hCol = Color3.fromRGB(255,255,0) end
+                highlight(obj, hCol)
             end
         end
     else
         order += 1
-        createEntry(Scroll, order,
-            '<font color="#FFAA00"><b>Không phát hiện crosshair nào.</b></font>\n' ..
-            '<font color="#AAAAAA">Có thể game dùng:\n' ..
-            '• Drawing API (không detect được từ Lua)\n' ..
-            '• Mouse.Icon thay đổi\n' ..
-            '• BillboardGui trong 3D space\n' ..
-            '• Crosshair chưa được tạo (chưa equip weapon)</font>',
-            Color3.fromRGB(35, 30, 15)
+        makeCard(order,
+            '<font color="#FFAA00"><b>Không phát hiện crosshair nào</b></font>\n\n' ..
+            '<font color="#AAA">Có thể game dùng:\n' ..
+            '• BillboardGui trong 3D world\n' ..
+            '• Drawing API (C++ level)\n' ..
+            '• Mouse.Icon làm crosshair\n' ..
+            '• Crosshair chưa spawn (chưa cầm vũ khí)</font>\n\n' ..
+            '<font color="#888">💡 Thử: cầm vũ khí rồi scan lại</font>',
+            Color3.fromRGB(35, 30, 10)
         )
     end
 
-    -- Cross pattern details
+    -- Cross patterns
     if #patterns > 0 then
         order += 1
-        createEntry(Scroll, order,
-            '<font color="#00FF88"><b>━━━ ✚ CROSS PATTERNS DETECTED ━━━</b></font>',
-            Color3.fromRGB(10, 40, 20)
+        makeCard(order,
+            '<font color="#00FF88"><b>━━ ✚ CROSS PATTERNS ━━</b></font>',
+            Color3.fromRGB(10, 35, 15)
         )
-        for pidx, pat in ipairs(patterns) do
+        for pi, pat in ipairs(patterns) do
             order += 1
-            local pText
-            if pat.horizontal then
-                pText = string.format(
-                    '<font color="#00FF88">Cross Pattern #%d</font>\n' ..
-                    '  Horizontal: %s (%.0f×%.0f)\n' ..
-                    '  Vertical: %s (%.0f×%.0f)\n' ..
-                    '  Gap: %.1fpx  Center: (%.0f, %.0f)',
-                    pidx,
-                    pat.horizontal.Name,
-                    pat.horizontal.AbsoluteSize.X, pat.horizontal.AbsoluteSize.Y,
-                    pat.vertical.Name,
-                    pat.vertical.AbsoluteSize.X, pat.vertical.AbsoluteSize.Y,
-                    pat.gap,
-                    pat.center.X, pat.center.Y
-                )
-            else
-                pText = string.format(
-                    '<font color="#00FF88">Multi-Line Cross Pattern</font>\n' ..
-                    '  Type: %s  Parts: %d',
-                    pat.type or "unknown", pat.count or 0
-                )
-            end
-            createEntry(Scroll, order, pText, Color3.fromRGB(15, 35, 20))
+            makeCard(order, string.format(
+                '<font color="#00FF88">Pattern #%d</font>  Gap: %.1fpx\n' ..
+                '  H: <font color="#FFD700">%s</font> (%.0f×%.0f)\n' ..
+                '  V: <font color="#FFD700">%s</font> (%.0f×%.0f)',
+                pi, pat.gap,
+                pat.h.Name, pat.h.AbsoluteSize.X, pat.h.AbsoluteSize.Y,
+                pat.v.Name, pat.v.AbsoluteSize.X, pat.v.AbsoluteSize.Y
+            ), Color3.fromRGB(12, 30, 18))
         end
     end
 end
 
 -------------------------------------------------
--- TOGGLE
+-- TOGGLE (animation)
 -------------------------------------------------
 local isOpen = false
 local updateConn = nil
 
+local function tweenBtn(props, duration)
+    TweenService:Create(ToggleBtn, TweenInfo.new(duration or 0.2), props):Play()
+end
+
 local function setOpen(state)
     isOpen = state
-    Panel.Visible = isOpen
 
     if isOpen then
-        ToggleBtn.Text = "🎯 Detector ON"
-        ToggleBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 70)
+        Panel.Visible = true
+        ToggleBtn.Text = "🎯 ON"
+        tweenBtn({BackgroundColor3 = Color3.fromRGB(0, 150, 70)})
 
         render()
 
@@ -1094,10 +977,13 @@ local function setOpen(state)
             end
         end)
     else
-        ToggleBtn.Text = "🎯 Detector OFF"
-        ToggleBtn.BackgroundColor3 = Color3.fromRGB(150, 30, 30)
+        ToggleBtn.Text = "🎯 OFF"
+        tweenBtn({BackgroundColor3 = Color3.fromRGB(180, 30, 30)})
 
-        clearAll()
+        clearEntries()
+        clearHighlights()
+        Panel.Visible = false
+
         if updateConn then
             updateConn:Disconnect()
             updateConn = nil
@@ -1105,12 +991,42 @@ local function setOpen(state)
     end
 end
 
-ToggleBtn.MouseButton1Click:Connect(function() setOpen(not isOpen) end)
-CloseBtn.MouseButton1Click:Connect(function() setOpen(false) end)
-
-UserInputService.InputBegan:Connect(function(input, gp)
-    if gp then return end
-    if input.KeyCode == Enum.KeyCode.F3 then setOpen(not isOpen) end
+-------------------------------------------------
+-- INPUT
+-------------------------------------------------
+ToggleBtn.MouseButton1Click:Connect(function()
+    setOpen(not isOpen)
 end)
 
-print("🎯 Crosshair Detector loaded — F3 or button to toggle")
+CloseBtn.MouseButton1Click:Connect(function()
+    setOpen(false)
+end)
+
+-- PC: F3
+if IS_PC then
+    UserInputService.InputBegan:Connect(function(input, gp)
+        if gp then return end
+        if input.KeyCode == Enum.KeyCode.F3 then
+            setOpen(not isOpen)
+        end
+    end)
+end
+
+-------------------------------------------------
+-- VIEWPORT CHANGE → rescale
+-------------------------------------------------
+Camera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
+    UI_SCALE = getScale()
+    -- Update device
+    local vs = Camera.ViewportSize
+    IS_MOBILE = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+    IS_TABLET = IS_MOBILE and (vs.X > 1000)
+end)
+
+-------------------------------------------------
+print("═══════════════════════════════════════")
+print("  🎯 Mobile Crosshair Detector Loaded")
+print("  Device: " .. DEVICE_NAME)
+print("  Scale: " .. math.floor(UI_SCALE * 100) .. "%")
+print("  Toggle: Button or F3 (PC)")
+print("═══════════════════════════════════════")

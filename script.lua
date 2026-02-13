@@ -4,6 +4,7 @@
     LocalScript → StarterGui
     
     Hoạt động trên: Mobile / Tablet / PC
+    + Name Tags bên dưới mỗi box
 ]]
 
 local Players          = game:GetService("Players")
@@ -26,16 +27,15 @@ local IS_PC      = UserInputService.KeyboardEnabled
 local DEVICE_NAME = IS_MOBILE and (IS_TABLET and "Tablet" or "Phone") or "PC"
 
 -------------------------------------------------
--- RESPONSIVE CONFIG (tự scale theo màn hình)
+-- RESPONSIVE CONFIG
 -------------------------------------------------
 local function getScale()
     local vp = Camera.ViewportSize
     local shortSide = math.min(vp.X, vp.Y)
-
-    if shortSide < 400 then return 0.65 end   -- điện thoại nhỏ
-    if shortSide < 600 then return 0.75 end   -- điện thoại thường
-    if shortSide < 900 then return 0.85 end   -- tablet
-    return 1                                    -- PC / màn hình lớn
+    if shortSide < 400 then return 0.65 end
+    if shortSide < 600 then return 0.75 end
+    if shortSide < 900 then return 0.85 end
+    return 1
 end
 
 local UI_SCALE = getScale()
@@ -67,7 +67,7 @@ ScreenGui.IgnoreGuiInset = true
 ScreenGui.Parent         = PlayerGui
 
 -- ═══════════════════════════════════════
--- TOGGLE BUTTON (luôn hiển thị, dễ bấm)
+-- TOGGLE BUTTON
 -- ═══════════════════════════════════════
 local ToggleBtn = Instance.new("TextButton")
 ToggleBtn.Name              = "ToggleBtn"
@@ -79,7 +79,6 @@ ToggleBtn.ZIndex            = 100
 ToggleBtn.Text              = "🎯 OFF"
 ToggleBtn.Parent            = ScreenGui
 
--- Mobile: nút to hơn, dễ bấm ngón tay
 if IS_MOBILE then
     ToggleBtn.Size     = UDim2.new(0, S(120), 0, S(50))
     ToggleBtn.Position = UDim2.new(0, S(10), 0, S(40))
@@ -94,7 +93,7 @@ local tStroke = Instance.new("UIStroke", ToggleBtn)
 tStroke.Color = Color3.new(1,1,1); tStroke.Transparency = 0.5; tStroke.Thickness = S(2)
 
 -- ═══════════════════════════════════════
--- MAIN PANEL (responsive)
+-- MAIN PANEL
 -- ═══════════════════════════════════════
 local Panel = Instance.new("Frame")
 Panel.Name              = "MainPanel"
@@ -108,9 +107,7 @@ Instance.new("UICorner", Panel).CornerRadius = UDim.new(0, S(14))
 local pStroke = Instance.new("UIStroke", Panel)
 pStroke.Color = Color3.fromRGB(255, 60, 60); pStroke.Thickness = S(2)
 
--- Responsive panel size
 if IS_MOBILE and not IS_TABLET then
-    -- Phone: gần full màn hình
     Panel.Size     = UDim2.new(0.95, 0, 0.8, 0)
     Panel.Position = UDim2.new(0.025, 0, 0.1, 0)
 else
@@ -119,14 +116,14 @@ else
 end
 
 -- ═══════════════════════════════════════
--- DRAGGING (hoạt động trên cả mobile)
+-- DRAGGING
 -- ═══════════════════════════════════════
 local dragging    = false
 local dragStart   = nil
 local startPos    = nil
 
 local function onDragStart(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 
+    if input.UserInputType == Enum.UserInputType.MouseButton1
     or input.UserInputType == Enum.UserInputType.Touch then
         dragging  = true
         dragStart = input.Position
@@ -141,7 +138,7 @@ end
 
 local function onDragMove(input)
     if not dragging then return end
-    if input.UserInputType == Enum.UserInputType.MouseMovement 
+    if input.UserInputType == Enum.UserInputType.MouseMovement
     or input.UserInputType == Enum.UserInputType.Touch then
         local delta = input.Position - dragStart
         Panel.Position = UDim2.new(
@@ -151,17 +148,16 @@ local function onDragMove(input)
     end
 end
 
--- Title Bar (vùng kéo)
+-- Title Bar
 local TitleBar = Instance.new("Frame")
-TitleBar.Name                  = "TitleBar"
-TitleBar.Size                  = UDim2.new(1, 0, 0, S(48))
-TitleBar.BackgroundColor3      = Color3.fromRGB(20, 10, 10)
-TitleBar.BorderSizePixel       = 0
-TitleBar.ZIndex                = 51
-TitleBar.Parent                = Panel
+TitleBar.Name             = "TitleBar"
+TitleBar.Size             = UDim2.new(1, 0, 0, S(48))
+TitleBar.BackgroundColor3 = Color3.fromRGB(20, 10, 10)
+TitleBar.BorderSizePixel  = 0
+TitleBar.ZIndex           = 51
+TitleBar.Parent           = Panel
 Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, S(14))
 
--- Fix bottom corners
 local titleFix = Instance.new("Frame")
 titleFix.Size             = UDim2.new(1, 0, 0, S(14))
 titleFix.Position         = UDim2.new(0, 0, 1, -S(14))
@@ -176,16 +172,16 @@ UserInputService.InputChanged:Connect(onDragMove)
 
 -- Title Label
 local TitleLabel = Instance.new("TextLabel")
-TitleLabel.Size                  = UDim2.new(1, -S(90), 1, 0)
-TitleLabel.Position              = UDim2.new(0, S(12), 0, 0)
+TitleLabel.Size                   = UDim2.new(1, -S(90), 1, 0)
+TitleLabel.Position               = UDim2.new(0, S(12), 0, 0)
 TitleLabel.BackgroundTransparency = 1
-TitleLabel.Font                  = Enum.Font.GothamBold
-TitleLabel.TextColor3            = Color3.fromRGB(255, 80, 80)
-TitleLabel.TextXAlignment        = Enum.TextXAlignment.Left
-TitleLabel.TextTruncate          = Enum.TextTruncate.AtEnd
-TitleLabel.RichText              = true
-TitleLabel.ZIndex                = 52
-TitleLabel.Parent                = TitleBar
+TitleLabel.Font                   = Enum.Font.GothamBold
+TitleLabel.TextColor3             = Color3.fromRGB(255, 80, 80)
+TitleLabel.TextXAlignment         = Enum.TextXAlignment.Left
+TitleLabel.TextTruncate           = Enum.TextTruncate.AtEnd
+TitleLabel.RichText               = true
+TitleLabel.ZIndex                 = 52
+TitleLabel.Parent                 = TitleBar
 
 if IS_MOBILE and not IS_TABLET then
     TitleLabel.TextSize = S(13)
@@ -197,18 +193,18 @@ end
 
 -- Device Badge
 local DeviceBadge = Instance.new("TextLabel")
-DeviceBadge.Size                  = UDim2.new(0, S(70), 0, S(22))
-DeviceBadge.Position              = UDim2.new(1, -S(110), 0.5, -S(11))
-DeviceBadge.BackgroundColor3      = IS_MOBILE 
-    and Color3.fromRGB(0, 120, 200) 
+DeviceBadge.Size             = UDim2.new(0, S(70), 0, S(22))
+DeviceBadge.Position         = UDim2.new(1, -S(110), 0.5, -S(11))
+DeviceBadge.BackgroundColor3 = IS_MOBILE
+    and Color3.fromRGB(0, 120, 200)
     or Color3.fromRGB(100, 60, 200)
-DeviceBadge.TextColor3            = Color3.new(1, 1, 1)
-DeviceBadge.Font                  = Enum.Font.GothamBold
-DeviceBadge.TextSize              = S(11)
-DeviceBadge.Text                  = IS_MOBILE and "📱 Mobile" or "💻 PC"
-DeviceBadge.BorderSizePixel       = 0
-DeviceBadge.ZIndex                = 52
-DeviceBadge.Parent                = TitleBar
+DeviceBadge.TextColor3       = Color3.new(1, 1, 1)
+DeviceBadge.Font             = Enum.Font.GothamBold
+DeviceBadge.TextSize         = S(11)
+DeviceBadge.Text             = IS_MOBILE and "📱 Mobile" or "💻 PC"
+DeviceBadge.BorderSizePixel  = 0
+DeviceBadge.ZIndex           = 52
+DeviceBadge.Parent           = TitleBar
 Instance.new("UICorner", DeviceBadge).CornerRadius = UDim.new(0, S(6))
 
 -- Close Button
@@ -229,21 +225,21 @@ Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, S(8))
 -- INFO BAR
 -- ═══════════════════════════════════════
 local InfoBar = Instance.new("TextLabel")
-InfoBar.Size                  = UDim2.new(1, -S(16), 0, S(45))
-InfoBar.Position              = UDim2.new(0, S(8), 0, S(52))
-InfoBar.BackgroundColor3      = Color3.fromRGB(20, 20, 35)
+InfoBar.Size                   = UDim2.new(1, -S(16), 0, S(45))
+InfoBar.Position               = UDim2.new(0, S(8), 0, S(52))
+InfoBar.BackgroundColor3       = Color3.fromRGB(20, 20, 35)
 InfoBar.BackgroundTransparency = 0.3
-InfoBar.TextColor3            = Color3.fromRGB(180, 180, 180)
-InfoBar.Font                  = Enum.Font.RobotoMono
-InfoBar.TextSize              = S(11)
-InfoBar.TextXAlignment        = Enum.TextXAlignment.Left
-InfoBar.TextYAlignment        = Enum.TextYAlignment.Top
-InfoBar.TextWrapped           = true
-InfoBar.RichText              = true
-InfoBar.BorderSizePixel       = 0
-InfoBar.ZIndex                = 51
-InfoBar.Text                  = ""
-InfoBar.Parent                = Panel
+InfoBar.TextColor3             = Color3.fromRGB(180, 180, 180)
+InfoBar.Font                   = Enum.Font.RobotoMono
+InfoBar.TextSize               = S(11)
+InfoBar.TextXAlignment         = Enum.TextXAlignment.Left
+InfoBar.TextYAlignment         = Enum.TextYAlignment.Top
+InfoBar.TextWrapped            = true
+InfoBar.RichText               = true
+InfoBar.BorderSizePixel        = 0
+InfoBar.ZIndex                 = 51
+InfoBar.Text                   = ""
+InfoBar.Parent                 = Panel
 Instance.new("UICorner", InfoBar).CornerRadius = UDim.new(0, S(8))
 local infoPad = Instance.new("UIPadding", InfoBar)
 infoPad.PaddingLeft = UDim.new(0, S(8)); infoPad.PaddingTop = UDim.new(0, S(4))
@@ -309,6 +305,42 @@ local function isActuallyVisible(obj)
     return true
 end
 
+-- ═══════════════════════════════════════════════
+-- HELPER: Rút gọn path cho dễ đọc
+-- ═══════════════════════════════════════════════
+local function getShortPath(obj)
+    local parts = {}
+    local current = obj
+    local count = 0
+    while current and current ~= game and count < 5 do
+        table.insert(parts, 1, current.Name)
+        current = current.Parent
+        count += 1
+    end
+    if current and current ~= game then
+        table.insert(parts, 1, "…")
+    end
+    return table.concat(parts, " › ")
+end
+
+-- ═══════════════════════════════════════════════
+-- HELPER: Emoji theo class
+-- ═══════════════════════════════════════════════
+local function getClassEmoji(className)
+    local map = {
+        ImageLabel  = "🖼️",
+        ImageButton = "🖼️",
+        TextLabel   = "📝",
+        TextButton  = "🔘",
+        TextBox     = "📦",
+        Frame       = "📐",
+        ViewportFrame = "🎥",
+        VideoFrame  = "🎬",
+        ScrollingFrame = "📜",
+    }
+    return map[className] or "◻️"
+end
+
 -------------------------------------------------
 -- 9 DETECTION METHODS
 -------------------------------------------------
@@ -338,7 +370,6 @@ local function scoreByName(obj)
         end
     end
 
-    -- Parent name
     local p = obj.Parent
     if p and p:IsA("GuiObject") then
         local pn = p.Name:lower()
@@ -354,7 +385,6 @@ local function scoreByName(obj)
         end
     end
 
-    -- Grandparent
     if p and p.Parent and p.Parent:IsA("GuiObject") then
         local gn = p.Parent.Name:lower()
         for _, kw in ipairs(NAME_KEYWORDS.high) do
@@ -497,7 +527,6 @@ local function scoreByLayer(obj)
     return score, reasons
 end
 
--- Cross pattern
 local function findCrossPatterns(allObjs)
     local center = getScreenCenter()
     local patterns = {}
@@ -529,7 +558,6 @@ local function findCrossPatterns(allObjs)
     return patterns
 end
 
--- Tracking
 local trackData = {}
 
 local function scoreByTracking(obj)
@@ -560,7 +588,6 @@ local function scoreByTracking(obj)
     return score, reasons
 end
 
--- Mouse detection
 local function detectMouse()
     local results = {}
 
@@ -608,7 +635,6 @@ local function analyze()
     local patterns = findCrossPatterns(allVisible)
     local candidates = {}
 
-    -- Map pattern objects
     local patternObjs = {}
     for _, p in ipairs(patterns) do
         patternObjs[p.h] = true
@@ -641,7 +667,6 @@ local function analyze()
             end
         end
 
-        -- Cross pattern bonus
         if patternObjs[obj] then
             totalScore += 30
             table.insert(allReasons, "Cross pattern member +30")
@@ -679,12 +704,12 @@ end
 local function highlight(obj, color)
     pcall(function()
         local f = Instance.new("Frame")
-        f.Name                  = "_CH_Highlight"
-        f.Size                  = UDim2.new(1, 6, 1, 6)
-        f.Position              = UDim2.new(0, -3, 0, -3)
+        f.Name                   = "_CH_Highlight"
+        f.Size                   = UDim2.new(1, 6, 1, 6)
+        f.Position               = UDim2.new(0, -3, 0, -3)
         f.BackgroundTransparency = 1
-        f.ZIndex                = 99999
-        f.Parent                = obj
+        f.ZIndex                 = 99999
+        f.Parent                 = obj
 
         local s = Instance.new("UIStroke", f)
         s.Color = color; s.Thickness = 2
@@ -713,22 +738,22 @@ end
 
 local function makeCard(order, text, bgColor)
     local card = Instance.new("TextLabel")
-    card.Size                  = UDim2.new(1, -S(4), 0, 0)
-    card.AutomaticSize         = Enum.AutomaticSize.Y
-    card.BackgroundColor3      = bgColor or Color3.fromRGB(25, 25, 40)
+    card.Size                   = UDim2.new(1, -S(4), 0, 0)
+    card.AutomaticSize          = Enum.AutomaticSize.Y
+    card.BackgroundColor3       = bgColor or Color3.fromRGB(25, 25, 40)
     card.BackgroundTransparency = 0.15
-    card.TextColor3            = Color3.fromRGB(220, 220, 220)
-    card.Font                  = Enum.Font.RobotoMono
-    card.TextSize              = S(12)
-    card.TextXAlignment        = Enum.TextXAlignment.Left
-    card.TextYAlignment        = Enum.TextYAlignment.Top
-    card.TextWrapped           = true
-    card.RichText              = true
-    card.LayoutOrder           = order
-    card.Text                  = text
-    card.BorderSizePixel       = 0
-    card.ZIndex                = 51
-    card.Parent                = Scroll
+    card.TextColor3             = Color3.fromRGB(220, 220, 220)
+    card.Font                   = Enum.Font.RobotoMono
+    card.TextSize               = S(12)
+    card.TextXAlignment         = Enum.TextXAlignment.Left
+    card.TextYAlignment         = Enum.TextYAlignment.Top
+    card.TextWrapped            = true
+    card.RichText               = true
+    card.LayoutOrder            = order
+    card.Text                   = text
+    card.BorderSizePixel        = 0
+    card.ZIndex                 = 51
+    card.Parent                 = Scroll
     Instance.new("UICorner", card).CornerRadius = UDim.new(0, S(8))
 
     local pad = Instance.new("UIPadding", card)
@@ -739,6 +764,126 @@ local function makeCard(order, text, bgColor)
 
     table.insert(activeEntries, card)
     return card
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- ★ NEW: Name Tag dưới mỗi box - nổi bật, dễ phân biệt
+-- ═══════════════════════════════════════════════════════════
+local function makeNameTag(order, obj, idx, score)
+    local emoji     = getClassEmoji(obj.ClassName)
+    local shortPath = getShortPath(obj)
+    local absSize   = obj.AbsoluteSize
+
+    -- Chọn màu theo confidence
+    local tagColor, textColor, borderColor
+    if score >= 80 then
+        tagColor    = Color3.fromRGB(80, 15, 15)
+        textColor   = Color3.fromRGB(255, 100, 100)
+        borderColor = Color3.fromRGB(255, 60, 60)
+    elseif score >= 60 then
+        tagColor    = Color3.fromRGB(70, 40, 10)
+        textColor   = Color3.fromRGB(255, 180, 60)
+        borderColor = Color3.fromRGB(255, 140, 0)
+    elseif score >= 40 then
+        tagColor    = Color3.fromRGB(60, 55, 10)
+        textColor   = Color3.fromRGB(255, 230, 80)
+        borderColor = Color3.fromRGB(200, 200, 0)
+    else
+        tagColor    = Color3.fromRGB(15, 25, 50)
+        textColor   = Color3.fromRGB(130, 180, 255)
+        borderColor = Color3.fromRGB(80, 120, 200)
+    end
+
+    -- Container frame
+    local tag = Instance.new("Frame")
+    tag.Name                   = "NameTag_" .. idx
+    tag.Size                   = UDim2.new(1, -S(4), 0, 0)
+    tag.AutomaticSize          = Enum.AutomaticSize.Y
+    tag.BackgroundColor3       = tagColor
+    tag.BackgroundTransparency = 0.05
+    tag.BorderSizePixel        = 0
+    tag.LayoutOrder            = order
+    tag.ZIndex                 = 52
+    tag.Parent                 = Scroll
+    Instance.new("UICorner", tag).CornerRadius = UDim.new(0, S(10))
+
+    local tagStroke = Instance.new("UIStroke", tag)
+    tagStroke.Color     = borderColor
+    tagStroke.Thickness = S(2)
+    tagStroke.Transparency = 0.3
+
+    local tagPad = Instance.new("UIPadding", tag)
+    tagPad.PaddingLeft   = UDim.new(0, S(10))
+    tagPad.PaddingRight  = UDim.new(0, S(10))
+    tagPad.PaddingTop    = UDim.new(0, S(6))
+    tagPad.PaddingBottom = UDim.new(0, S(6))
+
+    local tagLayout = Instance.new("UIListLayout", tag)
+    tagLayout.Padding       = UDim.new(0, S(2))
+    tagLayout.SortOrder     = Enum.SortOrder.LayoutOrder
+    tagLayout.FillDirection = Enum.FillDirection.Vertical
+
+    -- ─── Dòng 1: Index + Tên nổi bật ───
+    local nameLine = Instance.new("TextLabel")
+    nameLine.Size                   = UDim2.new(1, 0, 0, 0)
+    nameLine.AutomaticSize          = Enum.AutomaticSize.Y
+    nameLine.BackgroundTransparency = 1
+    nameLine.Font                   = Enum.Font.GothamBold
+    nameLine.TextSize               = S(14)
+    nameLine.TextColor3             = textColor
+    nameLine.TextXAlignment         = Enum.TextXAlignment.Left
+    nameLine.TextWrapped            = true
+    nameLine.RichText               = true
+    nameLine.LayoutOrder            = 1
+    nameLine.ZIndex                 = 53
+    nameLine.Text                   = string.format(
+        '%s  <font color="#FFFFFF"><b>#%d</b></font>  <font size="%d"><b>%s</b></font>',
+        emoji, idx, S(16), obj.Name
+    )
+    nameLine.Parent = tag
+
+    -- ─── Dòng 2: Class + Size + Score ───
+    local detailLine = Instance.new("TextLabel")
+    detailLine.Size                   = UDim2.new(1, 0, 0, 0)
+    detailLine.AutomaticSize          = Enum.AutomaticSize.Y
+    detailLine.BackgroundTransparency = 1
+    detailLine.Font                   = Enum.Font.RobotoMono
+    detailLine.TextSize               = S(10)
+    detailLine.TextColor3             = Color3.fromRGB(170, 170, 190)
+    detailLine.TextXAlignment         = Enum.TextXAlignment.Left
+    detailLine.TextWrapped            = true
+    detailLine.RichText               = true
+    detailLine.LayoutOrder            = 2
+    detailLine.ZIndex                 = 53
+    detailLine.Text                   = string.format(
+        '<font color="#888">[%s]</font>  <font color="#AADDFF">%.0f×%.0f px</font>  <font color="%s">Score: %d</font>',
+        obj.ClassName,
+        absSize.X, absSize.Y,
+        score >= 60 and "#FF8844" or "#88AACC",
+        score
+    )
+    detailLine.Parent = tag
+
+    -- ─── Dòng 3: Path rút gọn ───
+    local pathLine = Instance.new("TextLabel")
+    pathLine.Size                   = UDim2.new(1, 0, 0, 0)
+    pathLine.AutomaticSize          = Enum.AutomaticSize.Y
+    pathLine.BackgroundTransparency = 1
+    pathLine.Font                   = Enum.Font.Roboto
+    pathLine.TextSize               = S(9)
+    pathLine.TextColor3             = Color3.fromRGB(120, 120, 140)
+    pathLine.TextXAlignment         = Enum.TextXAlignment.Left
+    pathLine.TextWrapped            = true
+    pathLine.RichText               = true
+    pathLine.LayoutOrder            = 3
+    pathLine.ZIndex                 = 53
+    pathLine.Text                   = string.format(
+        '<font color="#555">📂 %s</font>', shortPath
+    )
+    pathLine.Parent = tag
+
+    table.insert(activeEntries, tag)
+    return tag
 end
 
 local function getConfLabel(score)
@@ -762,7 +907,6 @@ local function render()
     local candidates, patterns, allVisible, mouseInfo = analyze()
     local viewport = Camera.ViewportSize
 
-    -- Info bar
     InfoBar.Text = string.format(
         '<font color="#00C8FF">📱 %s</font>  |  ' ..
         '<font color="#AAAAAA">Screen: %.0f×%.0f  Scale: %.0f%%</font>\n' ..
@@ -798,33 +942,30 @@ local function render()
 
         for idx, c in ipairs(candidates) do
             if idx > 20 then break end
-            order += 1
 
             local obj = c.obj
             local pos = obj.Position
             local siz = obj.Size
 
+            -- ★ NAME TAG trước mỗi card (nổi bật, dễ tìm)
+            order += 1
+            makeNameTag(order, obj, idx, c.score)
+
+            -- Detail card
+            order += 1
+
             local lines = {}
 
-            -- Header
             table.insert(lines, string.format(
                 '%s  Score: <b>%d</b>',
                 getConfLabel(c.score), c.score
             ))
 
-            -- Methods
             table.insert(lines, string.format(
                 '<font color="#AAAAAA">Methods:</font> %s',
                 table.concat(c.methods, " ")
             ))
 
-            -- Name + Class
-            table.insert(lines, string.format(
-                '<font color="#FFD700">%s</font> <font color="#777">[%s]</font>',
-                obj.Name, obj.ClassName
-            ))
-
-            -- ═══ OFFSET INFO (quan trọng nhất) ═══
             table.insert(lines, "")
             table.insert(lines, '<font color="#00DDFF"><b>📐 OFFSET & POSITION:</b></font>')
 
@@ -857,7 +998,6 @@ local function render()
                 obj.AnchorPoint.X, obj.AnchorPoint.Y, c.dist
             ))
 
-            -- Extra info
             table.insert(lines, string.format(
                 '<font color="#888">ZIndex: %d  Rotation: %.1f°  Transp: %.2f</font>',
                 obj.ZIndex, obj.Rotation, obj.BackgroundTransparency
@@ -884,17 +1024,12 @@ local function render()
                 ))
             end
 
-            -- Reasons
             table.insert(lines, "")
             table.insert(lines, '<font color="#666">Phát hiện bởi:</font>')
             for _, r in ipairs(c.reasons) do
                 table.insert(lines, '<font color="#777">  • '..r..'</font>')
             end
 
-            -- Path
-            table.insert(lines, '<font color="#444">'..obj:GetFullName()..'</font>')
-
-            -- Background color by confidence
             local bgC
             if c.score >= 80 then bgC = Color3.fromRGB(50, 12, 12)
             elseif c.score >= 60 then bgC = Color3.fromRGB(45, 28, 8)
@@ -935,20 +1070,62 @@ local function render()
         )
         for pi, pat in ipairs(patterns) do
             order += 1
-            makeCard(order, string.format(
-                '<font color="#00FF88">Pattern #%d</font>  Gap: %.1fpx\n' ..
-                '  H: <font color="#FFD700">%s</font> (%.0f×%.0f)\n' ..
-                '  V: <font color="#FFD700">%s</font> (%.0f×%.0f)',
+
+            -- Name tag cho pattern
+            order += 1
+            local patTag = Instance.new("Frame")
+            patTag.Name                   = "PatternTag_" .. pi
+            patTag.Size                   = UDim2.new(1, -S(4), 0, 0)
+            patTag.AutomaticSize          = Enum.AutomaticSize.Y
+            patTag.BackgroundColor3       = Color3.fromRGB(10, 40, 25)
+            patTag.BackgroundTransparency = 0.05
+            patTag.BorderSizePixel        = 0
+            patTag.LayoutOrder            = order
+            patTag.ZIndex                 = 52
+            patTag.Parent                 = Scroll
+            Instance.new("UICorner", patTag).CornerRadius = UDim.new(0, S(8))
+
+            local ptStroke = Instance.new("UIStroke", patTag)
+            ptStroke.Color = Color3.fromRGB(0, 200, 100); ptStroke.Thickness = S(1)
+
+            local ptPad = Instance.new("UIPadding", patTag)
+            ptPad.PaddingLeft  = UDim.new(0, S(10))
+            ptPad.PaddingRight = UDim.new(0, S(10))
+            ptPad.PaddingTop   = UDim.new(0, S(6))
+            ptPad.PaddingBottom= UDim.new(0, S(6))
+
+            local ptLabel = Instance.new("TextLabel")
+            ptLabel.Size                   = UDim2.new(1, 0, 0, 0)
+            ptLabel.AutomaticSize          = Enum.AutomaticSize.Y
+            ptLabel.BackgroundTransparency = 1
+            ptLabel.Font                   = Enum.Font.GothamBold
+            ptLabel.TextSize               = S(12)
+            ptLabel.TextColor3             = Color3.fromRGB(100, 255, 150)
+            ptLabel.TextXAlignment         = Enum.TextXAlignment.Left
+            ptLabel.TextWrapped            = true
+            ptLabel.RichText               = true
+            ptLabel.ZIndex                 = 53
+            ptLabel.Text                   = string.format(
+                '✚ <font color="#FFFFFF"><b>Pattern #%d</b></font>  Gap: %.1fpx\n'..
+                '  <font color="#88FFAA">H:</font> <font color="#FFD700"><b>%s</b></font> <font color="#888">[%s]</font> %.0f×%.0f\n'..
+                '  <font color="#88FFAA">V:</font> <font color="#FFD700"><b>%s</b></font> <font color="#888">[%s]</font> %.0f×%.0f\n'..
+                '<font color="#555">📂 H: %s</font>\n'..
+                '<font color="#555">📂 V: %s</font>',
                 pi, pat.gap,
-                pat.h.Name, pat.h.AbsoluteSize.X, pat.h.AbsoluteSize.Y,
-                pat.v.Name, pat.v.AbsoluteSize.X, pat.v.AbsoluteSize.Y
-            ), Color3.fromRGB(12, 30, 18))
+                pat.h.Name, pat.h.ClassName, pat.h.AbsoluteSize.X, pat.h.AbsoluteSize.Y,
+                pat.v.Name, pat.v.ClassName, pat.v.AbsoluteSize.X, pat.v.AbsoluteSize.Y,
+                getShortPath(pat.h),
+                getShortPath(pat.v)
+            )
+            ptLabel.Parent = patTag
+
+            table.insert(activeEntries, patTag)
         end
     end
 end
 
 -------------------------------------------------
--- TOGGLE (animation)
+-- TOGGLE
 -------------------------------------------------
 local isOpen = false
 local updateConn = nil
@@ -1002,7 +1179,6 @@ CloseBtn.MouseButton1Click:Connect(function()
     setOpen(false)
 end)
 
--- PC: F3
 if IS_PC then
     UserInputService.InputBegan:Connect(function(input, gp)
         if gp then return end
@@ -1013,11 +1189,10 @@ if IS_PC then
 end
 
 -------------------------------------------------
--- VIEWPORT CHANGE → rescale
+-- VIEWPORT CHANGE
 -------------------------------------------------
 Camera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
     UI_SCALE = getScale()
-    -- Update device
     local vs = Camera.ViewportSize
     IS_MOBILE = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
     IS_TABLET = IS_MOBILE and (vs.X > 1000)
@@ -1029,4 +1204,5 @@ print("  🎯 Mobile Crosshair Detector Loaded")
 print("  Device: " .. DEVICE_NAME)
 print("  Scale: " .. math.floor(UI_SCALE * 100) .. "%")
 print("  Toggle: Button or F3 (PC)")
+print("  ★ Name Tags enabled")
 print("═══════════════════════════════════════")

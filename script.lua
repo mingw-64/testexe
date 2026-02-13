@@ -1,14 +1,13 @@
 --[[
-    Auto-Fire + ESP System
-    - Crosshair quét qua ĐỊCH → auto bắn
-    - ESP toàn bộ player: Xanh=Team, Đỏ=Địch
+    Auto-Fire + ESP System (Fixed)
+    - Fire button = ImageLabel → dùng firetouchinterest
+    - Giữ fire thay vì spam → không crash
     LocalScript → StarterGui
 ]]
 
 local Players          = game:GetService("Players")
 local RunService       = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local TweenService     = game:GetService("TweenService")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui   = LocalPlayer:WaitForChild("PlayerGui")
@@ -18,21 +17,12 @@ local Camera      = workspace.CurrentCamera
 -- CONFIG
 -------------------------------------------------
 local CONFIG = {
-    -- Auto Fire
-    FIRE_COOLDOWN      = 0.08,    -- giây giữa mỗi lần bắn
-    CROSSHAIR_PADDING  = 18,      -- px thêm xung quanh crosshair
-    FIRE_ONLY_ENEMY    = true,    -- chỉ bắn địch
+    CROSSHAIR_PADDING  = 18,
+    FIRE_ONLY_ENEMY    = true,
     
-    -- ESP
     ESP_ENABLED        = true,
-    ESP_BOX            = true,    -- hộp 2D
-    ESP_NAME           = true,    -- tên player
-    ESP_HEALTH         = true,    -- thanh máu
-    ESP_DISTANCE       = true,    -- khoảng cách
-    ESP_TRACERS        = false,   -- đường kẻ từ chân màn hình
-    ESP_MAX_DIST       = 1000,    -- studs tối đa hiện ESP
+    ESP_MAX_DIST       = 1000,
     
-    -- Colors
     ENEMY_COLOR        = Color3.fromRGB(255, 50, 50),
     TEAM_COLOR         = Color3.fromRGB(50, 255, 50),
     ENEMY_FILL         = Color3.fromRGB(255, 0, 0),
@@ -63,22 +53,22 @@ if not crosshairFrame then
 end
 
 if not fireBtn then
-    warn("⚠️ Không tìm thấy nút fire! Auto-fire sẽ không hoạt động")
-else
-    print("✅ Fire button:", fireBtn:GetFullName(), "Class:", fireBtn.ClassName)
+    warn("❌ Không tìm thấy fire button!")
+    return
 end
 
 print("✅ Crosshair:", crosshairFrame:GetFullName())
+print("✅ Fire button:", fireBtn:GetFullName(), "Class:", fireBtn.ClassName)
 
 -------------------------------------------------
 -- STATE
 -------------------------------------------------
 local autoFireEnabled = true
 local espEnabled      = true
-local lastFireTime    = 0
+local isHoldingFire   = false   -- đang giữ nút fire?
+local fireCount       = 0
+local espObjects      = {}
 local overlapping     = {}
-local totalKills      = 0
-local espObjects      = {}  -- [player] = {highlight, billboard, ...}
 
 -------------------------------------------------
 -- GUI
@@ -90,7 +80,7 @@ ScreenGui.DisplayOrder   = 99999
 ScreenGui.IgnoreGuiInset = true
 ScreenGui.Parent         = PlayerGui
 
--- ═══ TOGGLE PANEL ═══
+-- Toggle Panel
 local TogglePanel = Instance.new("Frame")
 TogglePanel.Name                   = "Toggles"
 TogglePanel.Size                   = UDim2.new(0, 160, 0, 130)
@@ -105,12 +95,14 @@ Instance.new("UICorner", TogglePanel).CornerRadius = UDim.new(0, 10)
 local tpStroke = Instance.new("UIStroke", TogglePanel)
 tpStroke.Color = Color3.fromRGB(255, 60, 60); tpStroke.Thickness = 2
 
--- Dragging cho toggle panel
+-- Drag
 local tDrag, tDragStart, tStartPos = false, nil, nil
 TogglePanel.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         tDrag = true; tDragStart = input.Position; tStartPos = TogglePanel.Position
-        input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then tDrag = false end end)
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then tDrag = false end
+        end)
     end
 end)
 UserInputService.InputChanged:Connect(function(input)
@@ -160,7 +152,7 @@ ESPBtn.ZIndex           = 101
 ESPBtn.Parent           = TogglePanel
 Instance.new("UICorner", ESPBtn).CornerRadius = UDim.new(0, 8)
 
--- Status label
+-- Status
 local StatusLabel = Instance.new("TextLabel")
 StatusLabel.Size                   = UDim2.new(1, -16, 0, 25)
 StatusLabel.Position               = UDim2.new(0, 8, 0, 96)
@@ -174,7 +166,7 @@ StatusLabel.Text                   = ""
 StatusLabel.ZIndex                 = 101
 StatusLabel.Parent                 = TogglePanel
 
--- ═══ HIT NOTIFICATION (giữa màn hình) ═══
+-- Hit Notification
 local HitNotif = Instance.new("TextLabel")
 HitNotif.Size                   = UDim2.new(0, 350, 0, 45)
 HitNotif.Position               = UDim2.new(0.5, -175, 0, 60)
@@ -194,32 +186,27 @@ Instance.new("UIStroke", HitNotif).Color = Color3.fromRGB(255, 50, 50)
 
 local notifHideTime = 0
 
+local function showNotif(text, color)
+    HitNotif.Text       = text
+    HitNotif.TextColor3 = color or Color3.fromRGB(255, 80, 80)
+    HitNotif.Visible    = true
+    notifHideTime       = tick() + 1.2
+end
+
 -------------------------------------------------
 -- HELPERS
 -------------------------------------------------
-
 local function isEnemy(player)
     if player == LocalPlayer then return false end
-    
-    -- Nếu game có team
     if LocalPlayer.Team and player.Team then
         return player.Team ~= LocalPlayer.Team
     end
-    
-    -- Nếu game dùng TeamColor
     if LocalPlayer.TeamColor and player.TeamColor then
         if LocalPlayer.TeamColor ~= BrickColor.new("White") then
             return player.TeamColor ~= LocalPlayer.TeamColor
         end
     end
-    
-    -- Không có team → coi tất cả là địch (trừ bản thân)
     return true
-end
-
-local function isTeammate(player)
-    if player == LocalPlayer then return true end
-    return not isEnemy(player)
 end
 
 local function getDistance(character)
@@ -251,53 +238,40 @@ local function pointInBounds(px, py, bounds)
        and py >= bounds.y1 and py <= bounds.y2
 end
 
-local function showNotif(text, color)
-    HitNotif.Text       = text
-    HitNotif.TextColor3 = color or Color3.fromRGB(255, 80, 80)
-    HitNotif.Visible    = true
-    notifHideTime        = tick() + 1.2
+-------------------------------------------------
+-- ★★★ FIRE SYSTEM (GIỮ / THẢ - KHÔNG SPAM) ★★★
+-------------------------------------------------
+
+local function startFire()
+    if isHoldingFire then return end
+    if not fireBtn or not fireBtn.Parent then return end
+
+    isHoldingFire = true
+    fireCount += 1
+
+    pcall(function()
+        -- ImageLabel → chỉ dùng firetouchinterest
+        if firetouchinterest then
+            firetouchinterest(fireBtn, fireBtn, 0) -- TouchBegan (giữ)
+        end
+    end)
 end
 
--------------------------------------------------
--- ★ FIRE BUTTON TRIGGER
--------------------------------------------------
-local function triggerFire()
-    if not fireBtn or not fireBtn.Parent then return end
-    
-    -- Method 1: firetouchinterest (mobile - phổ biến nhất)
-    if firetouchinterest then
-        firetouchinterest(fireBtn, fireBtn, 0)  -- TouchBegan
-        task.defer(function()
-            if fireBtn and fireBtn.Parent then
-                firetouchinterest(fireBtn, fireBtn, 1)  -- TouchEnded
-            end
-        end)
-        return true
-    end
-    
-    -- Method 2: fireclick
-    if fireclick then
-        fireclick(fireBtn)
-        return true
-    end
-    
-    -- Method 3: Simulate via VirtualInputManager
+local function stopFire()
+    if not isHoldingFire then return end
+
+    isHoldingFire = false
+
     pcall(function()
-        local vim = game:GetService("VirtualInputManager")
-        local pos = fireBtn.AbsolutePosition + fireBtn.AbsoluteSize / 2
-        vim:SendMouseButtonEvent(pos.X, pos.Y, 0, true, game, 1)
-        task.defer(function()
-            vim:SendMouseButtonEvent(pos.X, pos.Y, 0, false, game, 1)
-        end)
+        if firetouchinterest then
+            firetouchinterest(fireBtn, fireBtn, 1) -- TouchEnded (thả)
+        end
     end)
-    
-    return true
 end
 
 -------------------------------------------------
 -- ★★★ ESP SYSTEM ★★★
 -------------------------------------------------
-
 local function removeESP(player)
     if espObjects[player] then
         for _, obj in pairs(espObjects[player]) do
@@ -309,151 +283,136 @@ end
 
 local function createESP(player)
     if player == LocalPlayer then return end
-    
     removeESP(player)
-    
+
     local character = player.Character
     if not character then return end
-    
+
     local humanoid = character:FindFirstChildOfClass("Humanoid")
     if not humanoid then return end
-    
+
     local rootPart = character:FindFirstChild("HumanoidRootPart")
     if not rootPart then return end
-    
-    local enemy    = isEnemy(player)
-    local color    = enemy and CONFIG.ENEMY_COLOR or CONFIG.TEAM_COLOR
-    local fillCol  = enemy and CONFIG.ENEMY_FILL or CONFIG.TEAM_FILL
-    
+
+    local enemy   = isEnemy(player)
+    local color   = enemy and CONFIG.ENEMY_COLOR or CONFIG.TEAM_COLOR
+    local fillCol = enemy and CONFIG.ENEMY_FILL or CONFIG.TEAM_FILL
+
     local objects = {}
-    
-    -- ═══ HIGHLIGHT (viền sáng quanh character) ═══
-    local highlight = Instance.new("Highlight")
-    highlight.Name            = "ESP_Highlight"
-    highlight.Adornee         = character
-    highlight.FillColor       = fillCol
-    highlight.FillTransparency = 0.7
-    highlight.OutlineColor    = color
-    highlight.OutlineTransparency = 0
-    highlight.DepthMode       = Enum.HighlightDepthMode.AlwaysOnTop
-    highlight.Parent          = character
-    objects.highlight = highlight
-    
-    -- ═══ BILLBOARD GUI (tên + HP + khoảng cách) ═══
-    local billboard = Instance.new("BillboardGui")
-    billboard.Name            = "ESP_Info"
-    billboard.Adornee         = character:FindFirstChild("Head") or rootPart
-    billboard.Size            = UDim2.new(0, 200, 0, 80)
-    billboard.StudsOffset     = Vector3.new(0, 3, 0)
-    billboard.AlwaysOnTop     = true
-    billboard.LightInfluence  = 0
-    billboard.MaxDistance      = CONFIG.ESP_MAX_DIST
-    billboard.Parent          = character
-    objects.billboard = billboard
-    
-    -- Container
+
+    -- Highlight
+    local hl = Instance.new("Highlight")
+    hl.Name                = "ESP_HL"
+    hl.Adornee             = character
+    hl.FillColor           = fillCol
+    hl.FillTransparency    = 0.7
+    hl.OutlineColor        = color
+    hl.OutlineTransparency = 0
+    hl.DepthMode           = Enum.HighlightDepthMode.AlwaysOnTop
+    hl.Parent              = character
+    objects.highlight = hl
+
+    -- Billboard
+    local bb = Instance.new("BillboardGui")
+    bb.Name           = "ESP_BB"
+    bb.Adornee        = character:FindFirstChild("Head") or rootPart
+    bb.Size           = UDim2.new(0, 200, 0, 80)
+    bb.StudsOffset    = Vector3.new(0, 3, 0)
+    bb.AlwaysOnTop    = true
+    bb.LightInfluence = 0
+    bb.MaxDistance     = CONFIG.ESP_MAX_DIST
+    bb.Parent         = character
+    objects.billboard = bb
+
     local container = Instance.new("Frame")
     container.Size                   = UDim2.new(1, 0, 1, 0)
     container.BackgroundTransparency = 1
-    container.Parent                 = billboard
-    
+    container.Parent                 = bb
+
     local layout = Instance.new("UIListLayout", container)
     layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
     layout.Padding             = UDim.new(0, 2)
-    
-    -- ★ Tên player
-    if CONFIG.ESP_NAME then
-        local nameLabel = Instance.new("TextLabel")
-        nameLabel.Size                   = UDim2.new(1, 0, 0, 18)
-        nameLabel.BackgroundTransparency = 1
-        nameLabel.Font                   = Enum.Font.GothamBold
-        nameLabel.TextSize               = 14
-        nameLabel.TextColor3             = color
-        nameLabel.TextStrokeTransparency = 0.3
-        nameLabel.TextStrokeColor3       = Color3.new(0, 0, 0)
-        nameLabel.Text                   = (enemy and "☠️ " or "👤 ") .. player.Name
-        nameLabel.Parent                 = container
-        objects.nameLabel = nameLabel
-    end
-    
-    -- ★ Thanh máu
-    if CONFIG.ESP_HEALTH then
-        local hpBg = Instance.new("Frame")
-        hpBg.Size                   = UDim2.new(0.8, 0, 0, 6)
-        hpBg.BackgroundColor3       = Color3.fromRGB(40, 40, 40)
-        hpBg.BackgroundTransparency = 0.3
-        hpBg.BorderSizePixel        = 0
-        hpBg.Parent                 = container
-        Instance.new("UICorner", hpBg).CornerRadius = UDim.new(0, 3)
-        objects.hpBg = hpBg
-        
-        local hpBar = Instance.new("Frame")
-        hpBar.Size                   = UDim2.new(1, 0, 1, 0)
-        hpBar.BackgroundColor3       = Color3.fromRGB(0, 255, 0)
-        hpBar.BackgroundTransparency = 0
-        hpBar.BorderSizePixel        = 0
-        hpBar.Parent                 = hpBg
-        Instance.new("UICorner", hpBar).CornerRadius = UDim.new(0, 3)
-        objects.hpBar = hpBar
-        
-        local hpText = Instance.new("TextLabel")
-        hpText.Size                   = UDim2.new(1, 0, 0, 14)
-        hpText.BackgroundTransparency = 1
-        hpText.Font                   = Enum.Font.RobotoMono
-        hpText.TextSize               = 11
-        hpText.TextColor3             = Color3.new(1, 1, 1)
-        hpText.TextStrokeTransparency = 0.3
-        hpText.TextStrokeColor3       = Color3.new(0, 0, 0)
-        hpText.Text                   = ""
-        hpText.Parent                 = container
-        objects.hpText = hpText
-    end
-    
-    -- ★ Khoảng cách
-    if CONFIG.ESP_DISTANCE then
-        local distLabel = Instance.new("TextLabel")
-        distLabel.Size                   = UDim2.new(1, 0, 0, 14)
-        distLabel.BackgroundTransparency = 1
-        distLabel.Font                   = Enum.Font.RobotoMono
-        distLabel.TextSize               = 11
-        distLabel.TextColor3             = Color3.fromRGB(200, 200, 200)
-        distLabel.TextStrokeTransparency = 0.3
-        distLabel.TextStrokeColor3       = Color3.new(0, 0, 0)
-        distLabel.Text                   = ""
-        distLabel.Parent                 = container
-        objects.distLabel = distLabel
-    end
-    
+
+    -- Name
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Size                   = UDim2.new(1, 0, 0, 18)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Font                   = Enum.Font.GothamBold
+    nameLabel.TextSize               = 14
+    nameLabel.TextColor3             = color
+    nameLabel.TextStrokeTransparency = 0.3
+    nameLabel.TextStrokeColor3       = Color3.new(0, 0, 0)
+    nameLabel.Text                   = (enemy and "☠️ " or "👤 ") .. player.Name
+    nameLabel.Parent                 = container
+    objects.nameLabel = nameLabel
+
+    -- HP bar
+    local hpBg = Instance.new("Frame")
+    hpBg.Size                   = UDim2.new(0.8, 0, 0, 6)
+    hpBg.BackgroundColor3       = Color3.fromRGB(40, 40, 40)
+    hpBg.BackgroundTransparency = 0.3
+    hpBg.BorderSizePixel        = 0
+    hpBg.Parent                 = container
+    Instance.new("UICorner", hpBg).CornerRadius = UDim.new(0, 3)
+    objects.hpBg = hpBg
+
+    local hpBar = Instance.new("Frame")
+    hpBar.Size             = UDim2.new(1, 0, 1, 0)
+    hpBar.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
+    hpBar.BorderSizePixel  = 0
+    hpBar.Parent           = hpBg
+    Instance.new("UICorner", hpBar).CornerRadius = UDim.new(0, 3)
+    objects.hpBar = hpBar
+
+    -- HP text
+    local hpText = Instance.new("TextLabel")
+    hpText.Size                   = UDim2.new(1, 0, 0, 14)
+    hpText.BackgroundTransparency = 1
+    hpText.Font                   = Enum.Font.RobotoMono
+    hpText.TextSize               = 11
+    hpText.TextColor3             = Color3.new(1, 1, 1)
+    hpText.TextStrokeTransparency = 0.3
+    hpText.TextStrokeColor3       = Color3.new(0, 0, 0)
+    hpText.Text                   = ""
+    hpText.Parent                 = container
+    objects.hpText = hpText
+
+    -- Distance
+    local distLabel = Instance.new("TextLabel")
+    distLabel.Size                   = UDim2.new(1, 0, 0, 14)
+    distLabel.BackgroundTransparency = 1
+    distLabel.Font                   = Enum.Font.RobotoMono
+    distLabel.TextSize               = 11
+    distLabel.TextColor3             = Color3.fromRGB(200, 200, 200)
+    distLabel.TextStrokeTransparency = 0.3
+    distLabel.TextStrokeColor3       = Color3.new(0, 0, 0)
+    distLabel.Text                   = ""
+    distLabel.Parent                 = container
+    objects.distLabel = distLabel
+
     espObjects[player] = objects
 end
 
--- Cập nhật ESP mỗi frame
 local function updateESP(player)
     local data = espObjects[player]
     if not data then return end
-    
+
     local character = player.Character
     if not character then removeESP(player); return end
-    
+
     local humanoid = character:FindFirstChildOfClass("Humanoid")
     if not humanoid or humanoid.Health <= 0 then removeESP(player); return end
-    
+
     local dist = getDistance(character)
-    if dist > CONFIG.ESP_MAX_DIST then
-        if data.billboard then data.billboard.Enabled = false end
-        if data.highlight then data.highlight.Enabled = false end
-        return
-    else
-        if data.billboard then data.billboard.Enabled = true end
-        if data.highlight then data.highlight.Enabled = true end
-    end
-    
-    -- Update HP bar
+    local show = dist <= CONFIG.ESP_MAX_DIST
+
+    if data.billboard then data.billboard.Enabled = show end
+    if data.highlight then data.highlight.Enabled = show end
+    if not show then return end
+
     if data.hpBar then
         local ratio = math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1)
         data.hpBar.Size = UDim2.new(ratio, 0, 1, 0)
-        
-        -- Đổi màu thanh máu theo %
         if ratio > 0.6 then
             data.hpBar.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
         elseif ratio > 0.3 then
@@ -462,96 +421,84 @@ local function updateESP(player)
             data.hpBar.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
         end
     end
-    
+
     if data.hpText then
-        data.hpText.Text = string.format("❤️ %d/%d", 
+        data.hpText.Text = string.format("❤️ %d/%d",
             math.floor(humanoid.Health), math.floor(humanoid.MaxHealth))
     end
-    
+
     if data.distLabel then
         data.distLabel.Text = string.format("📏 %dm", math.floor(dist))
     end
 end
 
--- Tạo ESP cho player mới / respawn
 local function setupPlayerESP(player)
     if player == LocalPlayer then return end
-    
-    local function onCharacterAdded(character)
-        task.wait(0.5) -- đợi character load
-        if espEnabled then
-            createESP(player)
-        end
-        
-        -- Khi chết → xoá ESP rồi tạo lại khi respawn
-        local humanoid = character:WaitForChild("Humanoid", 5)
-        if humanoid then
-            humanoid.Died:Connect(function()
+
+    local function onChar(character)
+        task.wait(0.5)
+        if espEnabled then createESP(player) end
+
+        local hum = character:WaitForChild("Humanoid", 5)
+        if hum then
+            hum.Died:Connect(function()
                 task.wait(0.3)
                 removeESP(player)
             end)
         end
     end
-    
-    if player.Character then
-        onCharacterAdded(player.Character)
-    end
-    player.CharacterAdded:Connect(onCharacterAdded)
+
+    if player.Character then onChar(player.Character) end
+    player.CharacterAdded:Connect(onChar)
 end
 
 -------------------------------------------------
--- ★ CROSSHAIR → ENEMY DETECTION
+-- ★ CROSSHAIR CHECK (throttled - không mỗi frame)
 -------------------------------------------------
-local function checkCrosshairOnPlayers()
+local function checkCrosshairOnEnemy()
     if not crosshairFrame or not crosshairFrame.Parent then return nil end
     if not crosshairFrame.Visible then return nil end
-    
+
     local bounds = getCrosshairBounds()
-    
+
     for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and isEnemy(player) then
-            local character = player.Character
-            if not character then continue end
-            
-            local humanoid = character:FindFirstChildOfClass("Humanoid")
-            if not humanoid or humanoid.Health <= 0 then continue end
-            
-            for _, partName in ipairs(BODY_PARTS) do
-                local part = character:FindFirstChild(partName)
-                if part and part:IsA("BasePart") then
-                    local screenPos, onScreen = Camera:WorldToScreenPoint(part.Position)
-                    if onScreen and pointInBounds(screenPos.X, screenPos.Y, bounds) then
-                        return player, partName, getDistance(character), humanoid
-                    end
-                    
-                    -- Top/Bottom of part
-                    local top = part.Position + Vector3.new(0, part.Size.Y/2, 0)
-                    local sp1, on1 = Camera:WorldToScreenPoint(top)
-                    if on1 and pointInBounds(sp1.X, sp1.Y, bounds) then
-                        return player, partName, getDistance(character), humanoid
-                    end
+        if player == LocalPlayer then continue end
+        if not isEnemy(player) then continue end
+
+        local character = player.Character
+        if not character then continue end
+
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if not humanoid or humanoid.Health <= 0 then continue end
+
+        for _, partName in ipairs(BODY_PARTS) do
+            local part = character:FindFirstChild(partName)
+            if part and part:IsA("BasePart") then
+                local sp, onScreen = Camera:WorldToScreenPoint(part.Position)
+                if onScreen and pointInBounds(sp.X, sp.Y, bounds) then
+                    return player, partName, getDistance(character), humanoid
                 end
             end
         end
     end
-    
+
     return nil
 end
 
 -------------------------------------------------
 -- ★★★ MAIN LOOP ★★★
 -------------------------------------------------
-local fireCount    = 0
-local enemyOnAim   = nil
-local aimStartTime = 0
+local checkInterval   = 0
+local CHECK_RATE      = 1 / 30   -- check 30 lần/giây thay vì 60 → giảm lag
+local currentTarget   = nil
 
-RunService.RenderStepped:Connect(function()
-    -- Hide notif
+RunService.RenderStepped:Connect(function(dt)
+    -- Ẩn notif
     if HitNotif.Visible and tick() > notifHideTime then
         HitNotif.Visible = false
     end
-    
-    -- ═══ UPDATE ESP ═══
+
+    -- ═══ UPDATE ESP (mỗi frame - nhẹ) ═══
     if espEnabled then
         for _, player in ipairs(Players:GetPlayers()) do
             if player ~= LocalPlayer then
@@ -559,70 +506,63 @@ RunService.RenderStepped:Connect(function()
             end
         end
     end
-    
-    -- ═══ AUTO-FIRE ═══
-    if autoFireEnabled then
-        local hitPlayer, hitPart, dist, humanoid = checkCrosshairOnPlayers()
-        
-        if hitPlayer then
-            -- Crosshair trên địch!
-            local now = tick()
-            
-            if enemyOnAim ~= hitPlayer then
-                enemyOnAim   = hitPlayer
-                aimStartTime = now
-            end
-            
-            -- Fire nếu đủ cooldown
-            if now - lastFireTime >= CONFIG.FIRE_COOLDOWN then
-                local fired = triggerFire()
-                if fired then
-                    lastFireTime = now
-                    fireCount   += 1
-                end
-                
-                -- Notification
-                if not overlapping[hitPlayer.Name] then
-                    overlapping[hitPlayer.Name] = true
-                    
-                    local hp  = math.floor(humanoid.Health)
-                    local max = math.floor(humanoid.MaxHealth)
-                    
-                    showNotif(
-                        string.format(
-                            "🔫 <b>%s</b> | %s | ❤️%d/%d | 📏%dm",
-                            hitPlayer.Name, hitPart, hp, max, math.floor(dist)
-                        ),
-                        Color3.fromRGB(255, 50, 50)
-                    )
-                    
-                    print(string.format(
-                        "🔫 AUTO-FIRE → %s [%s] HP:%d/%d Dist:%dm",
-                        hitPlayer.Name, hitPart, hp, max, math.floor(dist)
-                    ))
-                end
-            end
-        else
-            -- Không ai trên crosshair
-            if enemyOnAim then
-                local name = enemyOnAim.Name
-                if overlapping[name] then
-                    overlapping[name] = nil
-                end
-                enemyOnAim = nil
-            end
+
+    -- ═══ AUTO-FIRE (throttled) ═══
+    if not autoFireEnabled then
+        if isHoldingFire then stopFire() end
+        return
+    end
+
+    checkInterval += dt
+    if checkInterval < CHECK_RATE then return end
+    checkInterval = 0
+
+    local hitPlayer, hitPart, dist, humanoid = checkCrosshairOnEnemy()
+
+    if hitPlayer then
+        -- ═══ ĐANG NGẮM ĐỊCH → GIỮ FIRE ═══
+        startFire()
+
+        if currentTarget ~= hitPlayer then
+            currentTarget = hitPlayer
+
+            local hp  = math.floor(humanoid.Health)
+            local max = math.floor(humanoid.MaxHealth)
+
+            showNotif(
+                string.format(
+                    "🔫 <b>%s</b> | %s | ❤️%d/%d | 📏%dm",
+                    hitPlayer.Name, hitPart, hp, max, math.floor(dist)
+                ),
+                Color3.fromRGB(255, 50, 50)
+            )
+
+            print(string.format(
+                "🔫 FIRE → %s [%s] HP:%d/%d Dist:%dm",
+                hitPlayer.Name, hitPart, hp, max, math.floor(dist)
+            ))
+        end
+    else
+        -- ═══ KHÔNG NGẮM AI → THẢ FIRE ═══
+        stopFire()
+
+        if currentTarget then
+            print("   ⏹️ Stop fire:", currentTarget.Name)
+            currentTarget = nil
         end
     end
-    
-    -- ═══ STATUS UPDATE ═══
+
+    -- Status
     StatusLabel.Text = string.format(
-        '<font color="#FF8888">Fired: %d</font>',
+        '<font color="%s">%s</font> Fired:%d',
+        isHoldingFire and "#FF4444" or "#88FF88",
+        isHoldingFire and "🔴 FIRING" or "🟢 IDLE",
         fireCount
     )
 end)
 
 -------------------------------------------------
--- TOGGLE BUTTONS
+-- TOGGLES
 -------------------------------------------------
 AutoFireBtn.MouseButton1Click:Connect(function()
     autoFireEnabled = not autoFireEnabled
@@ -632,8 +572,8 @@ AutoFireBtn.MouseButton1Click:Connect(function()
     else
         AutoFireBtn.Text = "🔫 Auto-Fire: OFF"
         AutoFireBtn.BackgroundColor3 = Color3.fromRGB(150, 30, 30)
-        overlapping = {}
-        enemyOnAim  = nil
+        stopFire()
+        currentTarget = nil
     end
 end)
 
@@ -642,7 +582,6 @@ ESPBtn.MouseButton1Click:Connect(function()
     if espEnabled then
         ESPBtn.Text = "👁️ ESP: ON"
         ESPBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 70)
-        -- Tạo lại ESP
         for _, player in ipairs(Players:GetPlayers()) do
             if player ~= LocalPlayer and player.Character then
                 createESP(player)
@@ -651,7 +590,6 @@ ESPBtn.MouseButton1Click:Connect(function()
     else
         ESPBtn.Text = "👁️ ESP: OFF"
         ESPBtn.BackgroundColor3 = Color3.fromRGB(150, 30, 30)
-        -- Xoá hết ESP
         for _, player in ipairs(Players:GetPlayers()) do
             removeESP(player)
         end
@@ -665,16 +603,16 @@ for _, player in ipairs(Players:GetPlayers()) do
     setupPlayerESP(player)
 end
 
-Players.PlayerAdded:Connect(function(player)
-    setupPlayerESP(player)
-end)
+Players.PlayerAdded:Connect(setupPlayerESP)
 
 Players.PlayerRemoving:Connect(function(player)
     removeESP(player)
-    overlapping[player.Name] = nil
+    if currentTarget == player then
+        stopFire()
+        currentTarget = nil
+    end
 end)
 
--- Team change → update ESP color
 LocalPlayer:GetPropertyChangedSignal("Team"):Connect(function()
     task.wait(0.5)
     if espEnabled then
@@ -686,30 +624,26 @@ LocalPlayer:GetPropertyChangedSignal("Team"):Connect(function()
     end
 end)
 
--------------------------------------------------
--- HOTKEY (PC)
--------------------------------------------------
+-- Hotkey PC
 if UserInputService.KeyboardEnabled then
     UserInputService.InputBegan:Connect(function(input, gp)
         if gp then return end
-        
-        -- F4: Toggle Auto-Fire
         if input.KeyCode == Enum.KeyCode.F4 then
             AutoFireBtn.MouseButton1Click:Fire()
-        end
-        
-        -- F5: Toggle ESP
-        if input.KeyCode == Enum.KeyCode.F5 then
+        elseif input.KeyCode == Enum.KeyCode.F5 then
             ESPBtn.MouseButton1Click:Fire()
         end
     end)
 end
 
--------------------------------------------------
+-- ★ SAFETY: khi script bị unload → thả fire
+game:BindToClose(function()
+    stopFire()
+end)
+
 print("═══════════════════════════════════════")
-print("  ⚡ Auto-Fire + ESP System Loaded")
-print("  🔫 Auto-Fire: ON (F4 toggle)")
-print("  👁️ ESP: ON (F5 toggle)")
-print("  🎯 Crosshair: cursor.Frame")
-print("  🔘 Fire: mobile.weapon.fire.fire")
+print("  ⚡ Auto-Fire + ESP (Fixed)")
+print("  🔫 Fire = ImageLabel → firetouchinterest")
+print("  ✅ Giữ/Thả thay vì spam → không crash")
+print("  👁️ ESP: ON | F4/F5 toggle")
 print("═══════════════════════════════════════")

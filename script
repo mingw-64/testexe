@@ -1,129 +1,58 @@
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 
--- 1. Tạo GUI Chính
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "PlayerStatsGUI"
-screenGui.ResetOnSpawn = false
+-- Truy cập vào PlayerGui thay vì StarterGui
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
--- Thử đưa vào CoreGui (nếu dùng executor), nếu không thì đưa vào PlayerGui
-local success = pcall(function()
-    screenGui.Parent = game:GetService("CoreGui")
-end)
-if not success then
-    screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
-end
+local function listPlayersInTeams()
+    -- Lấy đường dẫn tới Frame chứa 2 team (Dùng FindFirstChild để không bị lỗi nếu GUI chưa load kịp)
+    local teamsGui = PlayerGui:FindFirstChild("teams")
+    if not teamsGui then return warn("Không tìm thấy GUI 'teams'") end
+    
+    local mainFrame = teamsGui:FindFirstChild("frame") and teamsGui.frame:FindFirstChild("Frame")
+    if not mainFrame then return warn("Không tìm thấy đường dẫn 'teams.frame.Frame'") end
 
--- 2. Nút Bật/Tắt (Phù hợp cho Mobile)
-local toggleBtn = Instance.new("TextButton")
-toggleBtn.Size = UDim2.new(0, 120, 0, 40)
-toggleBtn.Position = UDim2.new(0, 10, 0, 10)
-toggleBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-toggleBtn.Font = Enum.Font.GothamBold
-toggleBtn.TextSize = 14
-toggleBtn.Text = "Mở Info Player"
-toggleBtn.Parent = screenGui
-toggleBtn.UICorner = Instance.new("UICorner", toggleBtn)
+    -- Lấy thư mục 'players' của team Attackers
+    local attackerPlayersPath = mainFrame:FindFirstChild("attackers") 
+        and mainFrame.attackers:FindFirstChild("image") 
+        and mainFrame.attackers.image:FindFirstChild("players")
 
--- 3. Khung chứa danh sách
-local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 300, 0, 350)
-mainFrame.Position = UDim2.new(0.5, -150, 0.5, -175)
-mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-mainFrame.Visible = false
-mainFrame.Parent = screenGui
-Instance.new("UICorner", mainFrame)
+    -- Lấy thư mục 'players' của team Defenders
+    local defenderPlayersPath = mainFrame:FindFirstChild("defenders") 
+        and mainFrame.defenders:FindFirstChild("image") 
+        and mainFrame.defenders.image:FindFirstChild("players")
 
--- Tiêu đề
-local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, 0, 0, 30)
-title.BackgroundTransparency = 1
-title.TextColor3 = Color3.fromRGB(255, 255, 255)
-title.Font = Enum.Font.GothamBold
-title.TextSize = 16
-title.Text = "Thông tin Người chơi"
-title.Parent = mainFrame
-
--- 4. Khung Cuộn (ScrollingFrame cho Mobile vuốt lên xuống)
-local scrollFrame = Instance.new("ScrollingFrame")
-scrollFrame.Size = UDim2.new(1, -10, 1, -40)
-scrollFrame.Position = UDim2.new(0, 5, 0, 35)
-scrollFrame.BackgroundTransparency = 1
-scrollFrame.ScrollBarThickness = 5
-scrollFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y -- Tự động dãn dài theo số lượng người chơi
-scrollFrame.Parent = mainFrame
-
-local listLayout = Instance.new("UIListLayout")
-listLayout.Parent = scrollFrame
-listLayout.SortOrder = Enum.SortOrder.Name
-listLayout.Padding = UDim.new(0, 5)
-
--- Chức năng Bật/Tắt GUI
-toggleBtn.MouseButton1Click:Connect(function()
-    mainFrame.Visible = not mainFrame.Visible
-    if mainFrame.Visible then
-        toggleBtn.Text = "Đóng Info Player"
+    -- 1. LIỆT KÊ TEAM ATTACKERS
+    print("=== TEAM ATTACKERS ===")
+    if attackerPlayersPath then
+        local count = 0
+        for _, child in pairs(attackerPlayersPath:GetChildren()) do
+            -- Lọc bỏ các component UI như UIListLayout, UIGridLayout (chỉ lấy các Frame của player)
+            if not child:IsA("UIComponent") and child.Name ~= "UIListLayout" and child.Name ~= "UIGridLayout" then
+                print("⚔️ " .. child.Name)
+                count = count + 1
+            end
+        end
+        if count == 0 then print("(Không có ai)") end
     else
-        toggleBtn.Text = "Mở Info Player"
+        warn("Không tìm thấy đường dẫn Attackers")
     end
-end)
 
--- 5. Hàm cập nhật thông tin
-local function updatePlayerList()
-    -- Xóa các nhãn cũ để làm mới
-    for _, child in pairs(scrollFrame:GetChildren()) do
-        if child:IsA("Frame") then
-            child:Destroy()
+    print("\n=== TEAM DEFENDERS ===")
+    -- 2. LIỆT KÊ TEAM DEFENDERS
+    if defenderPlayersPath then
+        local count = 0
+        for _, child in pairs(defenderPlayersPath:GetChildren()) do
+            if not child:IsA("UIComponent") and child.Name ~= "UIListLayout" and child.Name ~= "UIGridLayout" then
+                print("🛡️ " .. child.Name)
+                count = count + 1
+            end
         end
-    end
-
-    -- Lặp qua tất cả người chơi trong game
-    for _, player in pairs(Players:GetPlayers()) do
-        local char = player.Character
-        local humanoid = char and char:FindFirstChild("Humanoid")
-        
-        -- Lấy thông số
-        local health = humanoid and math.floor(humanoid.Health) or 0
-        local maxHealth = humanoid and math.floor(humanoid.MaxHealth) or 0
-        local walkSpeed = humanoid and math.floor(humanoid.WalkSpeed) or 0
-        local teamName = player.Team and player.Team.Name or "Không có Đội"
-        local displayName = player.DisplayName
-        
-        -- Tạo một khung nhỏ cho mỗi người chơi
-        local playerFrame = Instance.new("Frame")
-        playerFrame.Size = UDim2.new(1, 0, 0, 60)
-        playerFrame.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-        playerFrame.Name = player.Name
-        playerFrame.Parent = scrollFrame
-        Instance.new("UICorner", playerFrame)
-        
-        -- Nhãn text hiển thị thông tin
-        local infoLabel = Instance.new("TextLabel")
-        infoLabel.Size = UDim2.new(1, -10, 1, -10)
-        infoLabel.Position = UDim2.new(0, 5, 0, 5)
-        infoLabel.BackgroundTransparency = 1
-        infoLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-        infoLabel.Font = Enum.Font.Code
-        infoLabel.TextSize = 12
-        infoLabel.TextXAlignment = Enum.TextXAlignment.Left
-        infoLabel.TextYAlignment = Enum.TextYAlignment.Top
-        
-        -- Định dạng nội dung hiển thị
-        infoLabel.Text = string.format(
-            "👤 %s (@%s)\n❤️ HP: %d/%d | ⚡ Tốc độ: %d\n🛡️ Đội: %s",
-            displayName, player.Name, health, maxHealth, walkSpeed, teamName
-        )
-        infoLabel.Parent = playerFrame
+        if count == 0 then print("(Không có ai)") end
+    else
+        warn("Không tìm thấy đường dẫn Defenders")
     end
 end
 
--- 6. Vòng lặp cập nhật mỗi 1 giây
-task.spawn(function()
-    while task.wait(1) do
-        if mainFrame.Visible then
-            updatePlayerList()
-        end
-    end
-end)
+-- Chạy hàm
+listPlayersInTeams()

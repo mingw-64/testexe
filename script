@@ -1,122 +1,655 @@
-local Players = game:GetService("Players")
-local player = Players.LocalPlayer
-local playerGui = player:WaitForChild("PlayerGui")
+--========================================
+-- ULTIMATE TEAM FINDER v2.0
+-- Quét toàn bộ game tree để tìm team
+--========================================
 
--- 1. Hàm tạo giao diện hiển thị (Tối ưu cho Mobile)
-local function createDisplayGui()
-    -- Xóa GUI cũ nếu đã tồn tại để tránh trùng lặp
-    if playerGui:FindFirstChild("TeamListMobileGui") then
-        playerGui.TeamListMobileGui:Destroy()
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+
+-- Từ khóa cần tìm (viết thường để so sánh)
+local KEYWORDS = {"attack", "defend", "team", "side", "faction", "squad", "group"}
+local EXACT_TEAMS = {"attackers", "defenders", "attacker", "defender"}
+
+local results = {}
+local scannedCount = 0
+
+-- Hàm tiện ích
+local function log(category, msg)
+    local entry = "[" .. category .. "] " .. msg
+    table.insert(results, entry)
+    print(entry)
+end
+
+local function containsKeyword(str)
+    if type(str) ~= "string" then return false end
+    local lower = str:lower()
+    for _, kw in ipairs(KEYWORDS) do
+        if lower:find(kw) then return true end
+    end
+    return false
+end
+
+local function isExactTeam(str)
+    if type(str) ~= "string" then return false end
+    local lower = str:lower()
+    for _, t in ipairs(EXACT_TEAMS) do
+        if lower == t then return true end
+    end
+    return false
+end
+
+local function safeName(inst)
+    local success, result = pcall(function()
+        return inst:GetFullName()
+    end)
+    return success and result or "[Không đọc được]"
+end
+
+print("\n" .. string.rep("=", 60))
+print("   🔍 ULTIMATE TEAM FINDER - BẮT ĐẦU QUÉT")
+print(string.rep("=", 60) .. "\n")
+
+--========================================
+-- 1. TEAMS SERVICE (cách chính thức)
+--========================================
+print("\n📋 [1/12] KIỂM TRA TEAMS SERVICE...")
+pcall(function()
+    local TeamsService = game:GetService("Teams")
+    local teams = TeamsService:GetTeams()
+    if #teams > 0 then
+        for _, team in ipairs(teams) do
+            log("TEAMS SERVICE", string.format(
+                "Team: '%s' | Color: %s | Path: %s",
+                team.Name, tostring(team.TeamColor), safeName(team)
+            ))
+        end
+    else
+        log("TEAMS SERVICE", "⚠️ Không có team nào trong Teams service!")
+    end
+end)
+
+--========================================
+-- 2. KIỂM TRA PLAYER PROPERTIES
+--========================================
+print("\n👤 [2/12] KIỂM TRA PLAYER PROPERTIES...")
+pcall(function()
+    for _, player in ipairs(Players:GetPlayers()) do
+        -- Team property
+        pcall(function()
+            if player.Team then
+                log("PLAYER TEAM", string.format(
+                    "%s -> Team: '%s' | TeamColor: %s",
+                    player.Name, tostring(player.Team), tostring(player.TeamColor)
+                ))
+            end
+        end)
+
+        -- Neutral
+        pcall(function()
+            log("PLAYER NEUTRAL", string.format(
+                "%s -> Neutral: %s", player.Name, tostring(player.Neutral)
+            ))
+        end)
+    end
+end)
+
+--========================================
+-- 3. QUÉT ATTRIBUTES (cách hiện đại)
+--========================================
+print("\n🏷️ [3/12] QUÉT ATTRIBUTES...")
+
+local function scanAttributes(inst, path)
+    pcall(function()
+        local attrs = inst:GetAttributes()
+        for name, value in pairs(attrs) do
+            if containsKeyword(name) or containsKeyword(tostring(value)) then
+                log("ATTRIBUTE", string.format(
+                    "'%s' = %s (%s) | Tại: %s",
+                    name, tostring(value), typeof(value), path
+                ))
+            end
+        end
+    end)
+end
+
+--========================================
+-- 4. QUÉT COLLECTION SERVICE TAGS
+--========================================
+print("\n🏷️ [4/12] QUÉT COLLECTION SERVICE TAGS...")
+pcall(function()
+    local CS = game:GetService("CollectionService")
+
+    -- Tìm tất cả tag có keyword
+    for _, player in ipairs(Players:GetPlayers()) do
+        pcall(function()
+            local tags = CS:GetTags(player)
+            for _, tag in ipairs(tags) do
+                if containsKeyword(tag) then
+                    log("TAG (Player)", string.format(
+                        "%s có tag: '%s'", player.Name, tag
+                    ))
+                end
+            end
+        end)
+
+        -- Tag trên character
+        pcall(function()
+            if player.Character then
+                local tags = CS:GetTags(player.Character)
+                for _, tag in ipairs(tags) do
+                    if containsKeyword(tag) then
+                        log("TAG (Character)", string.format(
+                            "%s character có tag: '%s'", player.Name, tag
+                        ))
+                    end
+                end
+            end
+        end)
     end
 
-    local screenGui = Instance.new("ScreenGui")
-    screenGui.Name = "TeamListMobileGui"
-    screenGui.ResetOnSpawn = false
-    screenGui.Parent = playerGui
+    -- Thử tìm trực tiếp tag "attackers" và "defenders"
+    for _, teamName in ipairs(EXACT_TEAMS) do
+        pcall(function()
+            local tagged = CS:GetTagged(teamName)
+            if #tagged > 0 then
+                log("TAG SEARCH", string.format(
+                    "Tag '%s' có %d objects!", teamName, #tagged
+                ))
+                for _, obj in ipairs(tagged) do
+                    log("TAG SEARCH", "  -> " .. safeName(obj))
+                end
+            end
+        end)
+    end
 
-    -- Khung chính (Sử dụng Scale để tự động căn chỉnh trên màn hình điện thoại)
-    local mainFrame = Instance.new("Frame")
-    mainFrame.Size = UDim2.new(0.85, 0, 0.75, 0) -- Chiếm 85% chiều rộng, 75% chiều cao
-    mainFrame.Position = UDim2.new(0.075, 0, 0.125, 0) -- Căn giữa màn hình
-    mainFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
-    mainFrame.BorderSizePixel = 0
-    mainFrame.Parent = screenGui
+    -- Quét thêm các biến thể
+    local extraTags = {
+        "Attackers", "Defenders", "ATTACKERS", "DEFENDERS",
+        "Team_Attackers", "Team_Defenders", "team_attackers", "team_defenders",
+        "TeamAttackers", "TeamDefenders", "attacker_team", "defender_team",
+        "attack", "defend", "Attack", "Defend",
+        "team1", "team2", "Team1", "Team2",
+        "red", "blue", "Red", "Blue"
+    }
+    for _, tag in ipairs(extraTags) do
+        pcall(function()
+            local tagged = CS:GetTagged(tag)
+            if #tagged > 0 then
+                log("TAG EXTRA", string.format(
+                    "Tag '%s' có %d objects!", tag, #tagged
+                ))
+                for i, obj in ipairs(tagged) do
+                    if i <= 5 then
+                        log("TAG EXTRA", "  -> " .. safeName(obj))
+                    end
+                end
+            end
+        end)
+    end
+end)
 
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 15)
-    corner.Parent = mainFrame
+--========================================
+-- 5. QUÉT TẤT CẢ SERVICES CHÍNH
+--========================================
+print("\n🔎 [5/12] QUÉT TOÀN BỘ GAME TREE...")
 
-    -- Nút Đóng (Close Button)
-    local closeBtn = Instance.new("TextButton")
-    closeBtn.Size = UDim2.new(0, 40, 0, 40)
-    closeBtn.Position = UDim2.new(1, -50, 0, 10)
-    closeBtn.Text = "X"
-    closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-    closeBtn.TextScaled = true
-    closeBtn.Font = Enum.Font.GothamBold
-    closeBtn.Parent = mainFrame
-    
-    local closeCorner = Instance.new("UICorner")
-    closeCorner.CornerRadius = UDim.new(1, 0) -- Nút tròn
-    closeCorner.Parent = closeBtn
+local servicesToScan = {}
+local serviceNames = {
+    "Workspace", "ReplicatedStorage", "ReplicatedFirst",
+    "StarterGui", "StarterPack", "StarterPlayer",
+    "Lighting", "SoundService", "Chat",
+    "Teams", "ServerStorage", "ServerScriptService",
+    "TestService", "HttpService"
+}
 
-    closeBtn.MouseButton1Click:Connect(function()
-        screenGui:Destroy()
+for _, name in ipairs(serviceNames) do
+    pcall(function()
+        local service = game:GetService(name)
+        if service then
+            table.insert(servicesToScan, service)
+        end
+    end)
+end
+
+-- Thêm Players và children
+table.insert(servicesToScan, Players)
+
+local function deepScan(instance, depth)
+    if depth > 50 then return end -- Tránh quá sâu
+    scannedCount = scannedCount + 1
+
+    pcall(function()
+        local name = instance.Name
+        local className = instance.ClassName
+        local path = safeName(instance)
+
+        -- Kiểm tra tên instance
+        if containsKeyword(name) then
+            log("INSTANCE NAME", string.format(
+                "'%s' [%s] | Path: %s",
+                name, className, path
+            ))
+        end
+
+        -- Kiểm tra Value objects
+        if className == "StringValue" then
+            pcall(function()
+                local val = instance.Value
+                if containsKeyword(val) or containsKeyword(name) then
+                    log("STRING VALUE", string.format(
+                        "'%s' = '%s' | Path: %s",
+                        name, val, path
+                    ))
+                end
+            end)
+        elseif className == "IntValue" or className == "NumberValue" then
+            if containsKeyword(name) then
+                pcall(function()
+                    log("NUMBER VALUE", string.format(
+                        "'%s' = %s | Path: %s",
+                        name, tostring(instance.Value), path
+                    ))
+                end)
+            end
+        elseif className == "BoolValue" then
+            if containsKeyword(name) then
+                pcall(function()
+                    log("BOOL VALUE", string.format(
+                        "'%s' = %s | Path: %s",
+                        name, tostring(instance.Value), path
+                    ))
+                end)
+            end
+        elseif className == "ObjectValue" then
+            if containsKeyword(name) then
+                pcall(function()
+                    local val = instance.Value
+                    log("OBJECT VALUE", string.format(
+                        "'%s' = %s | Path: %s",
+                        name, val and safeName(val) or "nil", path
+                    ))
+                end)
+            end
+        end
+
+        -- Kiểm tra Folder / Model / Configuration có tên liên quan
+        if className == "Folder" or className == "Model" or className == "Configuration" then
+            if containsKeyword(name) then
+                local childCount = 0
+                pcall(function()
+                    childCount = #instance:GetChildren()
+                end)
+                log("CONTAINER", string.format(
+                    "[%s] '%s' (%d children) | Path: %s",
+                    className, name, childCount, path
+                ))
+            end
+        end
+
+        -- Kiểm tra GUI text
+        if className == "TextLabel" or className == "TextButton" or className == "TextBox" then
+            pcall(function()
+                if containsKeyword(instance.Text) then
+                    log("GUI TEXT", string.format(
+                        "'%s' Text: '%s' | Path: %s",
+                        name, instance.Text:sub(1, 100), path
+                    ))
+                end
+            end)
+        end
+
+        -- Kiểm tra Attributes
+        scanAttributes(instance, path)
     end)
 
-    -- Khung cuộn (ScrollingFrame) để lướt danh sách bằng ngón tay
-    local scrollFrame = Instance.new("ScrollingFrame")
-    scrollFrame.Size = UDim2.new(1, -20, 1, -60)
-    scrollFrame.Position = UDim2.new(0, 10, 0, 50)
-    scrollFrame.BackgroundTransparency = 1
-    scrollFrame.ScrollBarThickness = 6
-    scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
-    scrollFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    scrollFrame.Parent = mainFrame
-
-    local listLayout = Instance.new("UIListLayout")
-    listLayout.Padding = UDim.new(0, 8)
-    listLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-    listLayout.Parent = scrollFrame
-
-    return scrollFrame
+    -- Quét children
+    pcall(function()
+        for _, child in ipairs(instance:GetChildren()) do
+            deepScan(child, depth + 1)
+        end
+    end)
 end
 
--- Hàm phụ trợ để thêm chữ vào danh sách
-local function addTextLabel(parent, text, isTitle)
-    local label = Instance.new("TextLabel")
-    label.Size = UDim2.new(1, -10, 0, isTitle and 40 or 30)
-    label.BackgroundTransparency = 1
-    label.Text = text
-    label.TextColor3 = isTitle and Color3.fromRGB(255, 200, 50) or Color3.fromRGB(230, 230, 230)
-    label.TextScaled = true
-    label.Font = isTitle and Enum.Font.GothamBlack or Enum.Font.GothamSemibold
-    label.Parent = parent
+for _, service in ipairs(servicesToScan) do
+    pcall(function()
+        print("   Đang quét: " .. service.Name .. "...")
+        deepScan(service, 0)
+    end)
 end
 
--- 2. Tìm và trích xuất dữ liệu từ đường dẫn bạn cung cấp
-local function fetchAndDisplayTeams()
-    -- Sử dụng WaitForChild để đảm bảo GUI gốc đã load xong
-    local teamsGui = playerGui:WaitForChild("teams", 5)
-    if not teamsGui then return warn("Không tìm thấy GUI 'teams'") end
+--========================================
+-- 6. QUÉT PLAYER LEADERSTATS & CHILDREN
+--========================================
+print("\n📊 [6/12] QUÉT PLAYER LEADERSTATS & CHILDREN CHI TIẾT...")
+for _, player in ipairs(Players:GetPlayers()) do
+    pcall(function()
+        for _, child in ipairs(player:GetChildren()) do
+            local path = safeName(child)
+            log("PLAYER CHILD", string.format(
+                "%s -> [%s] '%s'",
+                player.Name, child.ClassName, child.Name
+            ))
 
-    local frame1 = teamsGui:WaitForChild("frame")
-    local frame2 = frame1:WaitForChild("Frame")
+            -- Đào sâu vào mỗi child
+            pcall(function()
+                for _, subChild in ipairs(child:GetChildren()) do
+                    log("PLAYER SUBCHILD", string.format(
+                        "  %s -> [%s] '%s' = %s",
+                        child.Name, subChild.ClassName, subChild.Name,
+                        pcall(function() return tostring(subChild.Value) end)
+                            and tostring(subChild.Value) or "N/A"
+                    ))
+                end
+            end)
+        end
+    end)
 
-    local attackersNode = frame2:WaitForChild("attackers"):WaitForChild("image"):WaitForChild("players")
-    local defendersNode = frame2:WaitForChild("defenders"):WaitForChild("image"):WaitForChild("players")
+    -- Attributes trên player
+    pcall(function()
+        local attrs = player:GetAttributes()
+        if next(attrs) then
+            log("PLAYER ATTRS", player.Name .. " attributes:")
+            for k, v in pairs(attrs) do
+                log("PLAYER ATTRS", string.format(
+                    "  '%s' = %s (%s)", k, tostring(v), typeof(v)
+                ))
+            end
+        end
+    end)
 
-    -- Tạo GUI hiển thị
-    local scrollContainer = createDisplayGui()
+    -- Character attributes
+    pcall(function()
+        if player.Character then
+            local attrs = player.Character:GetAttributes()
+            if next(attrs) then
+                log("CHAR ATTRS", player.Name .. " character attributes:")
+                for k, v in pairs(attrs) do
+                    log("CHAR ATTRS", string.format(
+                        "  '%s' = %s (%s)", k, tostring(v), typeof(v)
+                    ))
+                end
+            end
+        end
+    end)
+end
 
-    -- Danh sách Attackers
-    addTextLabel(scrollContainer, "⚔️ ATTACKERS ⚔️", true)
-    local attackerCount = 0
-    for _, child in pairs(attackersNode:GetChildren()) do
-        if child:IsA("GuiObject") then
-            -- Giả định tên người chơi được lưu ở thuộc tính 'Name' của child
-            -- Nếu nó nằm trong thuộc tính Text, hãy đổi child.Name thành child.Text
-            addTextLabel(scrollContainer, child.Name, false)
-            attackerCount = attackerCount + 1
+--========================================
+-- 7. QUÉT REMOTE EVENTS/FUNCTIONS
+--========================================
+print("\n📡 [7/12] QUÉT REMOTE EVENTS & FUNCTIONS...")
+local function scanRemotes(parent)
+    pcall(function()
+        for _, inst in ipairs(parent:GetDescendants()) do
+            pcall(function()
+                if inst:IsA("RemoteEvent") or inst:IsA("RemoteFunction")
+                    or inst:IsA("BindableEvent") or inst:IsA("BindableFunction")
+                    or inst:IsA("UnreliableRemoteEvent") then
+                    if containsKeyword(inst.Name) then
+                        log("REMOTE", string.format(
+                            "[%s] '%s' | Path: %s",
+                            inst.ClassName, inst.Name, safeName(inst)
+                        ))
+                    end
+                end
+            end)
+        end
+    end)
+end
+
+pcall(function() scanRemotes(game:GetService("ReplicatedStorage")) end)
+pcall(function() scanRemotes(game:GetService("Workspace")) end)
+
+--========================================
+-- 8. QUÉT MODULE SCRIPTS (đọc source nếu có thể)
+--========================================
+print("\n📜 [8/12] QUÉT MODULE SCRIPTS...")
+pcall(function()
+    for _, service in ipairs(servicesToScan) do
+        pcall(function()
+            for _, inst in ipairs(service:GetDescendants()) do
+                pcall(function()
+                    if inst:IsA("ModuleScript") then
+                        if containsKeyword(inst.Name) then
+                            log("MODULE", string.format(
+                                "'%s' | Path: %s",
+                                inst.Name, safeName(inst)
+                            ))
+                        end
+
+                        -- Thử require module
+                        pcall(function()
+                            local moduleData = require(inst)
+                            if type(moduleData) == "table" then
+                                for key, value in pairs(moduleData) do
+                                    if containsKeyword(tostring(key))
+                                        or containsKeyword(tostring(value)) then
+                                        log("MODULE DATA", string.format(
+                                            "Module '%s' -> ['%s'] = %s",
+                                            inst.Name,
+                                            tostring(key),
+                                            tostring(value):sub(1, 200)
+                                        ))
+                                    end
+
+                                    -- Nếu value là table, quét thêm 1 tầng
+                                    if type(value) == "table" then
+                                        for k2, v2 in pairs(value) do
+                                            if containsKeyword(tostring(k2))
+                                                or containsKeyword(tostring(v2)) then
+                                                log("MODULE DEEP", string.format(
+                                                    "Module '%s'['%s']['%s'] = %s",
+                                                    inst.Name,
+                                                    tostring(key),
+                                                    tostring(k2),
+                                                    tostring(v2):sub(1, 200)
+                                                ))
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end)
+                    end
+                end)
+            end
+        end)
+    end
+end)
+
+--========================================
+-- 9. KIỂM TRA HUMANOID DESCRIPTIONS & SPAWNS
+--========================================
+print("\n🏁 [9/12] QUÉT SPAWN LOCATIONS...")
+pcall(function()
+    for _, inst in ipairs(game.Workspace:GetDescendants()) do
+        pcall(function()
+            if inst:IsA("SpawnLocation") then
+                log("SPAWN", string.format(
+                    "'%s' | Neutral: %s | TeamColor: %s | AllowTeamChange: %s | Path: %s",
+                    inst.Name,
+                    tostring(inst.Neutral),
+                    tostring(inst.TeamColor),
+                    tostring(inst.AllowTeamChangeOnTouch),
+                    safeName(inst)
+                ))
+            end
+        end)
+    end
+end)
+
+--========================================
+-- 10. QUÉT _G VÀ SHARED (global tables)
+--========================================
+print("\n🌍 [10/12] QUÉT GLOBAL TABLES (_G, shared)...")
+local function scanGlobalTable(tableName, t)
+    if type(t) ~= "table" then return end
+    for key, value in pairs(t) do
+        pcall(function()
+            if containsKeyword(tostring(key)) or containsKeyword(tostring(value)) then
+                log("GLOBAL " .. tableName, string.format(
+                    "['%s'] = %s (%s)",
+                    tostring(key), tostring(value):sub(1, 200), type(value)
+                ))
+            end
+            if type(value) == "table" then
+                for k2, v2 in pairs(value) do
+                    if containsKeyword(tostring(k2)) or containsKeyword(tostring(v2)) then
+                        log("GLOBAL DEEP", string.format(
+                            "%s['%s']['%s'] = %s",
+                            tableName, tostring(key), tostring(k2),
+                            tostring(v2):sub(1, 200)
+                        ))
+                    end
+                end
+            end
+        end)
+    end
+end
+
+pcall(function() scanGlobalTable("_G", _G) end)
+pcall(function() scanGlobalTable("shared", shared) end)
+
+--========================================
+-- 11. QUÉT REGISTRY (getgc nếu executor hỗ trợ)
+--========================================
+print("\n🧠 [11/12] QUÉT GC REGISTRY (executor only)...")
+pcall(function()
+    if getgc then
+        local gc = getgc(true)
+        local gcFound = 0
+        for _, obj in ipairs(gc) do
+            if type(obj) == "table" then
+                for k, v in pairs(obj) do
+                    pcall(function()
+                        local kStr = tostring(k):lower()
+                        local vStr = tostring(v):lower()
+                        for _, exact in ipairs(EXACT_TEAMS) do
+                            if kStr == exact or vStr == exact then
+                                gcFound = gcFound + 1
+                                log("GC TABLE", string.format(
+                                    "['%s'] = %s (%s)",
+                                    tostring(k),
+                                    tostring(v):sub(1, 200),
+                                    type(v)
+                                ))
+                                -- In thêm context
+                                if gcFound <= 20 then
+                                    for k2, v2 in pairs(obj) do
+                                        log("GC CONTEXT", string.format(
+                                            "  ['%s'] = %s",
+                                            tostring(k2):sub(1, 50),
+                                            tostring(v2):sub(1, 100)
+                                        ))
+                                    end
+                                end
+                            end
+                        end
+                    end)
+                end
+            elseif type(obj) == "string" then
+                for _, exact in ipairs(EXACT_TEAMS) do
+                    if obj:lower():find(exact) then
+                        gcFound = gcFound + 1
+                        if gcFound <= 30 then
+                            log("GC STRING", obj:sub(1, 300))
+                        end
+                    end
+                end
+            end
+        end
+        log("GC SUMMARY", string.format("Tìm thấy %d kết quả trong GC", gcFound))
+    else
+        log("GC", "⚠️ getgc() không khả dụng (cần executor)")
+    end
+end)
+
+--========================================
+-- 12. QUÉT UPVALUES (nếu executor hỗ trợ)
+--========================================
+print("\n🔬 [12/12] QUÉT UPVALUES & CONSTANTS...")
+pcall(function()
+    if getgc and getupvalues then
+        local gc = getgc(true)
+        local uvFound = 0
+        for _, func in ipairs(gc) do
+            if type(func) == "function" then
+                pcall(function()
+                    -- Upvalues
+                    local upvals = getupvalues(func)
+                    for idx, val in pairs(upvals) do
+                        if type(val) == "string" and containsKeyword(val) then
+                            uvFound = uvFound + 1
+                            if uvFound <= 30 then
+                                log("UPVALUE", string.format(
+                                    "Function upvalue[%s] = '%s'",
+                                    tostring(idx), val:sub(1, 200)
+                                ))
+                            end
+                        elseif type(val) == "table" then
+                            for k, v in pairs(val) do
+                                if containsKeyword(tostring(k))
+                                    or containsKeyword(tostring(v)) then
+                                    uvFound = uvFound + 1
+                                    if uvFound <= 30 then
+                                        log("UPVALUE TABLE", string.format(
+                                            "['%s'] = %s",
+                                            tostring(k):sub(1, 50),
+                                            tostring(v):sub(1, 150)
+                                        ))
+                                    end
+                                end
+                            end
+                        end
+                    end
+
+                    -- Constants
+                    if getconstants then
+                        local consts = getconstants(func)
+                        for idx, val in pairs(consts) do
+                            if type(val) == "string" and containsKeyword(val) then
+                                uvFound = uvFound + 1
+                                if uvFound <= 50 then
+                                    log("CONSTANT", string.format(
+                                        "Function constant[%d] = '%s'",
+                                        idx, val:sub(1, 200)
+                                    ))
+                                end
+                            end
+                        end
+                    end
+                end)
+            end
         end
     end
-    if attackerCount == 0 then addTextLabel(scrollContainer, "(Trống)", false) end
+end)
 
-    -- Khoảng cách
-    addTextLabel(scrollContainer, " ", false)
+--========================================
+-- KẾT QUẢ TỔNG HỢP
+--========================================
+print("\n" .. string.rep("=", 60))
+print("   📊 KẾT QUẢ TỔNG HỢP")
+print(string.rep("=", 60))
+print(string.format("   Đã quét: %d instances", scannedCount))
+print(string.format("   Tìm thấy: %d kết quả", #results))
+print(string.rep("-", 60))
 
-    -- Danh sách Defenders
-    addTextLabel(scrollContainer, "🛡️ DEFENDERS 🛡️", true)
-    local defenderCount = 0
-    for _, child in pairs(defendersNode:GetChildren()) do
-        if child:IsA("GuiObject") then
-            addTextLabel(scrollContainer, child.Name, false)
-            defenderCount = defenderCount + 1
-        end
+-- Phân loại kết quả
+local categories = {}
+for _, result in ipairs(results) do
+    local cat = result:match("^%[(.-)%]")
+    if cat then
+        categories[cat] = (categories[cat] or 0) + 1
     end
-    if defenderCount == 0 then addTextLabel(scrollContainer, "(Trống)", false) end
 end
 
--- Chạy hàm
-fetchAndDisplayTeams()
+print("\n   📁 Phân loại:")
+for cat, count in pairs(categories) do
+    print(string.format("      %-20s : %d kết quả", cat, count))
+end
+
+print("\n" .. string.rep("=", 60))
+print("   ✅ QUÉT HOÀN TẤT!")
+print(string.rep("=", 60))
+
+-- Trả về results để dùng tiếp nếu cần
+return results

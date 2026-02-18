@@ -1,58 +1,135 @@
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
-
--- Truy cập vào PlayerGui thay vì StarterGui
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
-local function listPlayersInTeams()
-    -- Lấy đường dẫn tới Frame chứa 2 team (Dùng FindFirstChild để không bị lỗi nếu GUI chưa load kịp)
-    local teamsGui = PlayerGui:FindFirstChild("teams")
-    if not teamsGui then return warn("Không tìm thấy GUI 'teams'") end
+-- 1. TẠO GUI CHÍNH
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "TeamViewerGUI"
+screenGui.ResetOnSpawn = false
+
+-- Đưa vào CoreGui để an toàn (không bị mất khi reset), nếu không được thì vào PlayerGui
+local success = pcall(function()
+    screenGui.Parent = game:GetService("CoreGui")
+end)
+if not success then
+    screenGui.Parent = PlayerGui
+end
+
+-- 2. NÚT BẬT/TẮT (GÓC TRÁI)
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Size = UDim2.new(0, 100, 0, 40)
+toggleBtn.Position = UDim2.new(0, 10, 0, 60)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleBtn.Font = Enum.Font.GothamBold
+toggleBtn.TextSize = 14
+toggleBtn.Text = "Xem Team"
+toggleBtn.Parent = screenGui
+Instance.new("UICorner", toggleBtn)
+
+-- 3. KHUNG CHÍNH (HIỂN THỊ DANH SÁCH)
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 250, 0, 300)
+mainFrame.Position = UDim2.new(0.5, -125, 0.5, -150)
+mainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+mainFrame.Visible = false
+mainFrame.Parent = screenGui
+Instance.new("UICorner", mainFrame)
+
+-- 4. KHUNG CUỘN (SCROLLING FRAME ĐỂ VUỐT)
+local scrollFrame = Instance.new("ScrollingFrame")
+scrollFrame.Size = UDim2.new(1, -10, 1, -10)
+scrollFrame.Position = UDim2.new(0, 5, 0, 5)
+scrollFrame.BackgroundTransparency = 1
+scrollFrame.ScrollBarThickness = 4
+scrollFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+scrollFrame.Parent = mainFrame
+
+local listLayout = Instance.new("UIListLayout")
+listLayout.Parent = scrollFrame
+listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+listLayout.Padding = UDim.new(0, 5)
+
+-- Chức năng bật/tắt UI
+toggleBtn.MouseButton1Click:Connect(function()
+    mainFrame.Visible = not mainFrame.Visible
+end)
+
+-- 5. HÀM TẠO NHÃN TEXT TRONG GUI
+local layoutOrderCount = 0
+local function createLabel(text, color, isTitle)
+    layoutOrderCount = layoutOrderCount + 1
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, 0, 0, isTitle and 30 or 25)
+    label.BackgroundTransparency = isTitle and 0.5 or 1
+    label.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    label.TextColor3 = color
+    label.Text = "  " .. text
+    label.TextSize = isTitle and 14 or 12
+    label.Font = isTitle and Enum.Font.GothamBold or Enum.Font.Gotham
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.LayoutOrder = layoutOrderCount
+    label.Parent = scrollFrame
     
-    local mainFrame = teamsGui:FindFirstChild("frame") and teamsGui.frame:FindFirstChild("Frame")
-    if not mainFrame then return warn("Không tìm thấy đường dẫn 'teams.frame.Frame'") end
-
-    -- Lấy thư mục 'players' của team Attackers
-    local attackerPlayersPath = mainFrame:FindFirstChild("attackers") 
-        and mainFrame.attackers:FindFirstChild("image") 
-        and mainFrame.attackers.image:FindFirstChild("players")
-
-    -- Lấy thư mục 'players' của team Defenders
-    local defenderPlayersPath = mainFrame:FindFirstChild("defenders") 
-        and mainFrame.defenders:FindFirstChild("image") 
-        and mainFrame.defenders.image:FindFirstChild("players")
-
-    -- 1. LIỆT KÊ TEAM ATTACKERS
-    print("=== TEAM ATTACKERS ===")
-    if attackerPlayersPath then
-        local count = 0
-        for _, child in pairs(attackerPlayersPath:GetChildren()) do
-            -- Lọc bỏ các component UI như UIListLayout, UIGridLayout (chỉ lấy các Frame của player)
-            if not child:IsA("UIComponent") and child.Name ~= "UIListLayout" and child.Name ~= "UIGridLayout" then
-                print("⚔️ " .. child.Name)
-                count = count + 1
-            end
-        end
-        if count == 0 then print("(Không có ai)") end
-    else
-        warn("Không tìm thấy đường dẫn Attackers")
-    end
-
-    print("\n=== TEAM DEFENDERS ===")
-    -- 2. LIỆT KÊ TEAM DEFENDERS
-    if defenderPlayersPath then
-        local count = 0
-        for _, child in pairs(defenderPlayersPath:GetChildren()) do
-            if not child:IsA("UIComponent") and child.Name ~= "UIListLayout" and child.Name ~= "UIGridLayout" then
-                print("🛡️ " .. child.Name)
-                count = count + 1
-            end
-        end
-        if count == 0 then print("(Không có ai)") end
-    else
-        warn("Không tìm thấy đường dẫn Defenders")
+    if isTitle then
+        Instance.new("UICorner", label)
     end
 end
 
--- Chạy hàm
-listPlayersInTeams()
+-- 6. HÀM CẬP NHẬT DỮ LIỆU TỪ GUI CỦA GAME
+local function updateTeamList()
+    -- Xóa list cũ
+    for _, child in pairs(scrollFrame:GetChildren()) do
+        if child:IsA("TextLabel") then child:Destroy() end
+    end
+    layoutOrderCount = 0
+
+    -- Truy cập đường dẫn bạn yêu cầu
+    local teamsGui = PlayerGui:FindFirstChild("teams")
+    if not teamsGui then
+        createLabel("Đang chờ GUI 'teams' load...", Color3.fromRGB(255, 100, 100), true)
+        return 
+    end
+    
+    local guiFrame = teamsGui:FindFirstChild("frame") and teamsGui.frame:FindFirstChild("Frame")
+    if not guiFrame then return end
+
+    local attackersPath = guiFrame:FindFirstChild("attackers") and guiFrame.attackers:FindFirstChild("image") and guiFrame.attackers.image:FindFirstChild("players")
+    local defendersPath = guiFrame:FindFirstChild("defenders") and guiFrame.defenders:FindFirstChild("image") and guiFrame.defenders.image:FindFirstChild("players")
+
+    -- Lấy Attackers
+    createLabel("⚔️ TEAM ATTACKERS", Color3.fromRGB(255, 80, 80), true)
+    if attackersPath then
+        local count = 0
+        for _, child in pairs(attackersPath:GetChildren()) do
+            if not child:IsA("UIComponent") and child.Name ~= "UIListLayout" and child.Name ~= "UIGridLayout" then
+                -- Nếu tên hiển thị nằm trong TextLabel con, bạn đổi child.Name thành child.TextLabel.Text
+                createLabel(child.Name, Color3.fromRGB(255, 255, 255), false)
+                count = count + 1
+            end
+        end
+        if count == 0 then createLabel("(Trống)", Color3.fromRGB(150, 150, 150), false) end
+    end
+
+    -- Lấy Defenders
+    createLabel("🛡️ TEAM DEFENDERS", Color3.fromRGB(80, 150, 255), true)
+    if defendersPath then
+        local count = 0
+        for _, child in pairs(defendersPath:GetChildren()) do
+            if not child:IsA("UIComponent") and child.Name ~= "UIListLayout" and child.Name ~= "UIGridLayout" then
+                createLabel(child.Name, Color3.fromRGB(255, 255, 255), false)
+                count = count + 1
+            end
+        end
+        if count == 0 then createLabel("(Trống)", Color3.fromRGB(150, 150, 150), false) end
+    end
+end
+
+-- 7. VÒNG LẶP AUTO UPDATE (Chỉ update khi đang mở GUI để đỡ lag máy)
+task.spawn(function()
+    while task.wait(1) do
+        if mainFrame.Visible then
+            updateTeamList()
+        end
+    end
+end)

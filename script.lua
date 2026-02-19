@@ -1,430 +1,666 @@
---[[
-    Crosshair Detector + ESP v5.0
-    LocalScript → StarterGui
-    [F2] Toggle ESP
-]]
+--================================================================
+--  ESP Script | PC + Mobile | GUI Toggle | Wall Check
+--  PC: RightShift để ẩn/hiện menu
+--  Mobile: Nhấn nút "ESP" trên thanh công cụ để bật/tắt
+--================================================================
 
+-- Dọn dẹp nếu chạy lại script
+if _G._ESPClean then pcall(_G._ESPClean) end
+
+--// Services
 local Players          = game:GetService("Players")
 local RunService       = game:GetService("RunService")
+local CoreGui          = game:GetService("CoreGui")
+local HttpService      = game:GetService("HttpService")
+local TextChatService  = game:GetService("TextChatService")
 local UserInputService = game:GetService("UserInputService")
+local StarterGui       = game:GetService("StarterGui")
+local Camera           = workspace.CurrentCamera
+local LocalPlayer      = Players.LocalPlayer
 
-local LocalPlayer = Players.LocalPlayer
-local PlayerGui   = LocalPlayer:WaitForChild("PlayerGui")
-local Camera      = workspace.CurrentCamera
+--// Lưu connections để cleanup
+local _conns    = {}
+local _gui      = nil
+local _folder   = nil
+local ESPStore  = {}
 
--- ═══════════════════════════════════════════════
--- CONFIG
--- ═══════════════════════════════════════════════
-local PADDING = 15
-local CHECK_PARTS = { "Head", "HumanoidRootPart", "UpperTorso", "Torso" }
-local espOn = true
+--// Config
+local CONFIG = {
+    ESPEnabled = true,
+    BoxESP     = true,
+    NameESP    = true,
+    HealthBar  = true,
+    WallCheck  = true,
+    TextSize   = 14,
+    BoxThick   = 1,
+    TeamColor  = Color3.fromRGB(0, 255, 0),
+    EnemyColor = Color3.fromRGB(255, 0, 0),
+    MaxDist    = 2000,
+    FillAlpha  = 0.5,
+    MenuKey    = Enum.KeyCode.RightShift,
+}
 
--- ═══════════════════════════════════════════════
--- TÌM CROSSHAIR
--- ═══════════════════════════════════════════════
-local cursorGui      = PlayerGui:WaitForChild("cursor", 10)
-local crosshairFrame = cursorGui and cursorGui:WaitForChild("Frame", 10)
-if not crosshairFrame then
-    warn("Khong tim thay cursor.Frame!")
-    return
+--// Kiểm tra Mobile
+local isMobile = UserInputService.TouchEnabled and not UserInputService.MouseEnabled
+
+--// Ẩn thanh điều hướng Roblox (cho Mobile)
+if isMobile then
+    StarterGui:SetCore("TopbarEnabled", false)
 end
 
--- ═══════════════════════════════════════════════
--- HELPERS
--- ═══════════════════════════════════════════════
-local function isEnemy(player)
-    if LocalPlayer.Team and player.Team then
-        return player.Team ~= LocalPlayer.Team
+--// ========================
+--// TEAM DETECTION
+--// ========================
+local TextChannels = TextChatService:WaitForChild("TextChannels", 10)
+local team1 = TextChannels and TextChannels:WaitForChild("team1", 5)
+local team2 = TextChannels and TextChannels:WaitForChild("team2", 5)
+
+local function isSameTeam(p1, p2)
+    if not team1 or not team2 then return false end
+    local function getTeam(p)
+        if team1:FindFirstChild(p.Name) then return 1 end
+        if team2:FindFirstChild(p.Name) then return 2 end
+        return nil
     end
-    return true
+    local a, b = getTeam(p1), getTeam(p2)
+    return a and b and a == b
 end
 
-local function getTeamColor(player)
-    return isEnemy(player)
-        and Color3.fromRGB(255, 0, 0)
-        or  Color3.fromRGB(0, 255, 0)
+local function getColor(player)
+    return isSameTeam(LocalPlayer, player)
+        and CONFIG.TeamColor
+        or  CONFIG.EnemyColor
 end
 
-local function getDistance(character)
-    local myChar = LocalPlayer.Character
-    if not myChar then return 999 end
-    local a = myChar:FindFirstChild("HumanoidRootPart")
-    local b = character:FindFirstChild("HumanoidRootPart")
-    if a and b then return (a.Position - b.Position).Magnitude end
-    return 999
+--// ========================
+--// WALL CHECK (Raycast)
+--// ========================
+local rayParams = RaycastParams.new()
+rayParams.FilterType       = Enum.RaycastFilterType.Exclude
+rayParams.RespectCanCollide = true
+
+local function isVisible(character)
+    local origin = Camera.CFrame.Position
+    local filter = { character }
+    if LocalPlayer.Character then
+        table.insert(filter, LocalPlayer.Character)
+    end
+    rayParams.FilterDescendantsInstances = filter
+
+    -- Kiểm tra nhiều bộ phận: nếu thấy 1 cái = Visible
+    for _, name in ipairs({"Head", "HumanoidRootPart", "Torso", "UpperTorso"}) do
+        local part = character:FindFirstChild(name)
+        if part then
+            local result = workspace:Raycast(origin, part.Position - origin, rayParams)
+            if not result then
+                return true
+            end
+        end
+    end
+    return false
 end
 
--- ═══════════════════════════════════════════════
--- NOTIFICATION GUI
--- ═══════════════════════════════════════════════
-local NotifGui = Instance.new("ScreenGui")
-NotifGui.Name            = "CrosshairNotif"
-NotifGui.ResetOnSpawn    = false
-NotifGui.DisplayOrder    = 99998
-NotifGui.IgnoreGuiInset  = true
-NotifGui.Parent          = PlayerGui
+--// ========================
+--// GUI MENU (PC + Mobile)
+--// ========================
+local menuVisible = true
 
-local NotifLabel = Instance.new("TextLabel")
-NotifLabel.Size                   = UDim2.new(0, 440, 0, 50)
-NotifLabel.Position               = UDim2.new(0.5, -220, 0, 80)
-NotifLabel.BackgroundColor3       = Color3.fromRGB(0, 0, 0)
-NotifLabel.BackgroundTransparency = 0.4
-NotifLabel.TextColor3             = Color3.fromRGB(255, 80, 80)
-NotifLabel.Font                   = Enum.Font.GothamBold
-NotifLabel.TextSize               = 18
-NotifLabel.Text                   = ""
-NotifLabel.Visible                = false
-NotifLabel.BorderSizePixel        = 0
-NotifLabel.RichText               = true
-NotifLabel.Parent                 = NotifGui
-Instance.new("UICorner", NotifLabel).CornerRadius = UDim.new(0, 10)
+local function createMenu()
+    local gui = Instance.new("ScreenGui")
+    gui.Name          = HttpService:GenerateGUID(false)
+    gui.Parent        = CoreGui
+    gui.ResetOnSpawn  = false
+    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    gui.IgnoreGuiInset = true -- Tránh bị che bởi thanh điều hướng
 
-local HitCounter = Instance.new("TextLabel")
-HitCounter.Size                   = UDim2.new(0, 200, 0, 30)
-HitCounter.Position               = UDim2.new(0.5, -100, 0, 135)
-HitCounter.BackgroundColor3       = Color3.fromRGB(0, 0, 0)
-HitCounter.BackgroundTransparency = 0.5
-HitCounter.TextColor3             = Color3.fromRGB(100, 255, 100)
-HitCounter.Font                   = Enum.Font.RobotoMono
-HitCounter.TextSize               = 14
-HitCounter.Text                   = "Hits: 0"
-HitCounter.Visible                = true
-HitCounter.BorderSizePixel        = 0
-HitCounter.RichText               = true
-HitCounter.Parent                 = NotifGui
-Instance.new("UICorner", HitCounter).CornerRadius = UDim.new(0, 8)
+    -- Main frame (responsive)
+    local main = Instance.new("Frame")
+    main.Size            = UDim2.new(0, isMobile and 220 or 240, 0, 10) -- Tự động resize
+    main.Position        = UDim2.new(0.5, isMobile and -110 or -120, 0, 60)
+    main.BackgroundColor3 = Color3.fromRGB(16, 16, 22)
+    main.BorderSizePixel  = 0
+    main.Parent           = gui
+    Instance.new("UICorner", main).CornerRadius = UDim.new(0, 10)
 
-local notifHideTime = 0
-local totalHits     = 0
+    local stroke = Instance.new("UIStroke", main)
+    stroke.Color          = Color3.fromRGB(110, 60, 210)
+    stroke.Thickness      = 1.5
+    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 
-local function showNotif(text, color)
-    NotifLabel.Text       = text
-    NotifLabel.TextColor3 = color or Color3.fromRGB(255, 80, 80)
-    NotifLabel.Visible    = true
-    notifHideTime         = tick() + 1.5
+    --// Title bar (kéo thả)
+    local titleBar = Instance.new("Frame")
+    titleBar.Size            = UDim2.new(1, 0, 0, 36)
+    titleBar.BackgroundColor3 = Color3.fromRGB(26, 26, 36)
+    titleBar.BorderSizePixel  = 0
+    titleBar.Parent           = main
+    Instance.new("UICorner", titleBar).CornerRadius = UDim.new(0, 10)
+
+    -- Fix góc dưới title
+    local fix = Instance.new("Frame")
+    fix.Size            = UDim2.new(1, 0, 0, 12)
+    fix.Position        = UDim2.new(0, 0, 1, -12)
+    fix.BackgroundColor3 = titleBar.BackgroundColor3
+    fix.BorderSizePixel  = 0
+    fix.Parent           = titleBar
+
+    local titleLbl = Instance.new("TextLabel")
+    titleLbl.Size               = UDim2.new(1, 0, 1, 0)
+    titleLbl.BackgroundTransparency = 1
+    titleLbl.Text               = "⚡ ESP PANEL"
+    titleLbl.TextColor3         = Color3.fromRGB(180, 130, 255)
+    titleLbl.Font               = Enum.Font.GothamBold
+    titleLbl.TextSize           = isMobile and 14 or 15
+    titleLbl.Parent             = titleBar
+
+    --// Dragging (PC + Mobile)
+    local dragging, dragStart, startPos
+    local function startDrag(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging  = true
+            dragStart = input.Position
+            startPos  = main.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end
+
+    titleBar.InputBegan:Connect(startDrag)
+    table.insert(_conns, UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+                      or input.UserInputType == Enum.UserInputType.Touch) then
+            local d = input.Position - dragStart
+            main.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + d.X,
+                startPos.Y.Scale, startPos.Y.Offset + d.Y
+            )
+        end
+    end))
+
+    --// Content
+    local content = Instance.new("Frame")
+    content.Size               = UDim2.new(1, -20, 0, 0)
+    content.Position           = UDim2.new(0, 10, 0, 42)
+    content.BackgroundTransparency = 1
+    content.AutomaticSize      = Enum.AutomaticSize.Y
+    content.Parent             = main
+
+    local list = Instance.new("UIListLayout")
+    list.SortOrder = Enum.SortOrder.LayoutOrder
+    list.Padding   = UDim.new(0, 5)
+    list.Parent    = content
+
+    --// Toggle factory (nút bấm lớn cho Mobile)
+    local function addToggle(text, configKey, order)
+        local row = Instance.new("Frame")
+        row.Size            = UDim2.new(1, 0, 0, isMobile and 40 or 32)
+        row.BackgroundColor3 = Color3.fromRGB(28, 28, 38)
+        row.BorderSizePixel  = 0
+        row.LayoutOrder      = order
+        row.Parent           = content
+        Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
+
+        local lbl = Instance.new("TextLabel")
+        lbl.Size               = UDim2.new(1, -80, 1, 0)
+        lbl.Position           = UDim2.new(0, 10, 0, 0)
+        lbl.BackgroundTransparency = 1
+        lbl.Text               = text
+        lbl.TextColor3         = Color3.fromRGB(210, 210, 220)
+        lbl.Font               = Enum.Font.Gotham
+        lbl.TextSize           = isMobile and 13 or 13
+        lbl.TextXAlignment     = Enum.TextXAlignment.Left
+        lbl.Parent             = row
+
+        local btn = Instance.new("TextButton")
+        btn.Size            = UDim2.new(0, isMobile and 60 or 50, 0, isMobile and 28 or 22)
+        btn.Position        = UDim2.new(1, isMobile and -68 or -58, 0.5, isMobile and -14 or -11)
+        btn.BorderSizePixel = 0
+        btn.Font            = Enum.Font.GothamBold
+        btn.TextSize        = isMobile and 12 or 11
+        btn.TextColor3      = Color3.new(1, 1, 1)
+        btn.AutoButtonColor = true
+        btn.Parent          = row
+        Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 5)
+
+        local function update()
+            if CONFIG[configKey] then
+                btn.Text            = "ON"
+                btn.BackgroundColor3 = Color3.fromRGB(0, 170, 80)
+            else
+                btn.Text            = "OFF"
+                btn.BackgroundColor3 = Color3.fromRGB(170, 40, 40)
+            end
+        end
+        update()
+
+        btn.MouseButton1Click:Connect(function()
+            CONFIG[configKey] = not CONFIG[configKey]
+            update()
+        end)
+    end
+
+    addToggle("ESP Master",  "ESPEnabled", 1)
+    addToggle("Box ESP",     "BoxESP",     2)
+    addToggle("Name / Dist", "NameESP",    3)
+    addToggle("Health Bar",  "HealthBar",  4)
+    addToggle("Wall Check",  "WallCheck",  5)
+
+    --// Auto-resize main frame
+    local function resize()
+        main.Size = UDim2.new(0, isMobile and 220 or 240, 0, 42 + content.AbsoluteSize.Y + 28)
+    end
+    list:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(resize)
+    task.defer(resize)
+
+    --// Footer
+    local hint = Instance.new("TextLabel")
+    hint.Size               = UDim2.new(1, 0, 0, 16)
+    hint.Position           = UDim2.new(0, 0, 1, -20)
+    hint.BackgroundTransparency = 1
+    hint.Text               = isMobile and "Tap 'ESP' to toggle" or "RightShift = toggle menu"
+    hint.TextColor3         = Color3.fromRGB(85, 85, 100)
+    hint.Font               = Enum.Font.Gotham
+    hint.TextSize           = 10
+    hint.Parent             = main
+
+    --// Phím tắt ẩn/hiện (PC + Mobile)
+    if isMobile then
+        -- Tạo nút bấm trên thanh công cụ (Mobile)
+        local mobileButton = Instance.new("TextButton")
+        mobileButton.Name = "ESPButton"
+        mobileButton.Size = UDim2.new(0, 60, 0, 30)
+        mobileButton.Position = UDim2.new(1, -70, 0, 10)
+        mobileButton.BackgroundColor3 = Color3.fromRGB(110, 60, 210)
+        mobileButton.TextColor3 = Color3.new(1, 1, 1)
+        mobileButton.Text = "ESP"
+        mobileButton.Font = Enum.Font.GothamBold
+        mobileButton.TextSize = 12
+        mobileButton.Parent = gui
+        Instance.new("UICorner", mobileButton).CornerRadius = UDim.new(0, 5)
+
+        mobileButton.MouseButton1Click:Connect(function()
+            menuVisible = not menuVisible
+            main.Visible = menuVisible
+        end)
+    else
+        -- Phím tắt PC
+        table.insert(_conns, UserInputService.InputBegan:Connect(function(input, gpe)
+            if gpe then return end
+            if input.KeyCode == CONFIG.MenuKey then
+                menuVisible = not menuVisible
+                main.Visible = menuVisible
+            end
+        end))
+    end
+
+    return gui
 end
 
--- ═══════════════════════════════════════════════
--- STATUS PANEL
--- ═══════════════════════════════════════════════
-local StatusGui = Instance.new("ScreenGui")
-StatusGui.Name           = "StatusPanel"
-StatusGui.ResetOnSpawn   = false
-StatusGui.DisplayOrder   = 99999
-StatusGui.IgnoreGuiInset = true
-StatusGui.Parent         = PlayerGui
+_gui = createMenu()
 
-local sFrame = Instance.new("Frame")
-sFrame.Size                   = UDim2.new(0, 240, 0, 50)
-sFrame.Position               = UDim2.new(0, 10, 0, 10)
-sFrame.BackgroundColor3       = Color3.fromRGB(12, 12, 12)
-sFrame.BackgroundTransparency = 0.15
-sFrame.BorderSizePixel        = 0
-sFrame.Parent                 = StatusGui
-Instance.new("UICorner", sFrame).CornerRadius = UDim.new(0, 10)
+--// ========================
+--// ESP RENDERING
+--// ========================
 
-local esLbl = Instance.new("TextLabel")
-esLbl.Size = UDim2.new(1, -10, 0, 20)
-esLbl.Position = UDim2.new(0, 5, 0, 5)
-esLbl.BackgroundTransparency = 1
-esLbl.Font = Enum.Font.RobotoMono
-esLbl.TextSize = 13
-esLbl.TextXAlignment = Enum.TextXAlignment.Left
-esLbl.RichText = true
-esLbl.TextColor3 = Color3.fromRGB(220, 220, 220)
-esLbl.Parent = sFrame
+local useDrawing = pcall(function()
+    local t = Drawing.new("Line"); t:Remove()
+end)
 
-local tgtLbl = esLbl:Clone()
-tgtLbl.Position = UDim2.new(0, 5, 0, 26)
-tgtLbl.Parent = sFrame
+-- ╔════════════════════════════════════════════╗
+-- ║  METHOD 1: DRAWING API (PC + Mobile)      ║
+-- ╚════════════════════════════════════════════╝
+if useDrawing then
 
-local currentTarget = nil
+    local function w2s(pos)
+        local v, vis = Camera:WorldToViewportPoint(pos)
+        return Vector2.new(v.X, v.Y), vis, v.Z
+    end
 
-local function refreshStatus()
-    esLbl.Text = espOn
-        and '[F2] ESP: <font color="#00FF00">ON</font>'
-        or  '[F2] ESP: <font color="#FF4444">OFF</font>'
-    tgtLbl.Text = currentTarget
-        and string.format('Target: <font color="#FF6644">%s</font>', currentTarget.Name)
-        or  'Target: <font color="#666">None</font>'
-end
-refreshStatus()
+    local function make(player)
+        local d = {
+            BoxOut   = Drawing.new("Square"),
+            Box      = Drawing.new("Square"),
+            Name     = Drawing.new("Text"),
+            Dist     = Drawing.new("Text"),
+            HpBG     = Drawing.new("Square"),
+            HpBar    = Drawing.new("Square"),
+            HpOut    = Drawing.new("Square"),
+            WallText = Drawing.new("Text"),
+        }
 
--- ═══════════════════════════════════════════════
--- ESP SYSTEM (thread riêng, 0.3s/lần)
--- ═══════════════════════════════════════════════
-local espCache = {}
+        d.BoxOut.Thickness = CONFIG.BoxThick + 2
+        d.BoxOut.Filled    = false
+        d.BoxOut.Color     = Color3.new(0, 0, 0)
+        d.BoxOut.ZIndex    = 1
 
-local function destroyESP(player)
-    local d = espCache[player]
-    if not d then return end
-    if d.highlight and d.highlight.Parent then d.highlight:Destroy() end
-    if d.billboard and d.billboard.Parent then d.billboard:Destroy() end
-    espCache[player] = nil
-end
+        d.Box.Thickness = CONFIG.BoxThick
+        d.Box.Filled    = false
+        d.Box.ZIndex    = 2
 
-local function buildESP(player)
-    if player == LocalPlayer then return end
-    destroyESP(player)
+        d.Name.Size    = CONFIG.TextSize
+        d.Name.Center  = true
+        d.Name.Outline = true
+        d.Name.Font    = 2
+        d.Name.ZIndex  = 3
 
-    local char = player.Character
-    if not char then return end
-    local hum  = char:FindFirstChildOfClass("Humanoid")
-    local head = char:FindFirstChild("Head")
-    if not hum or not head then return end
+        d.Dist.Size    = CONFIG.TextSize - 2
+        d.Dist.Center  = true
+        d.Dist.Outline = true
+        d.Dist.Font    = 2
+        d.Dist.Color   = Color3.new(1, 1, 1)
+        d.Dist.ZIndex  = 3
 
-    local col = getTeamColor(player)
-    local tag = isEnemy(player) and "ENEMY" or "ALLY"
+        d.HpBG.Filled       = true
+        d.HpBG.Color        = Color3.new(0, 0, 0)
+        d.HpBG.Transparency = 0.5
+        d.HpBG.ZIndex       = 1
 
-    local hl = Instance.new("Highlight")
-    hl.FillColor           = col
-    hl.FillTransparency    = 0.55
-    hl.OutlineColor        = col
-    hl.OutlineTransparency = 0
-    hl.DepthMode           = Enum.HighlightDepthMode.AlwaysOnTop
-    hl.Enabled             = espOn
-    hl.Adornee             = char
-    hl.Parent              = char
+        d.HpBar.Filled = true
+        d.HpBar.ZIndex = 2
 
-    local bb = Instance.new("BillboardGui")
-    bb.Adornee     = head
-    bb.Size        = UDim2.new(0, 180, 0, 52)
-    bb.StudsOffset = Vector3.new(0, 2.5, 0)
-    bb.AlwaysOnTop = true
-    bb.Enabled     = espOn
-    bb.Parent      = head
+        d.HpOut.Filled    = false
+        d.HpOut.Thickness = 1
+        d.HpOut.Color     = Color3.new(0, 0, 0)
+        d.HpOut.ZIndex    = 3
 
-    local nameL = Instance.new("TextLabel")
-    nameL.Size                   = UDim2.new(1, 0, 0, 18)
-    nameL.BackgroundTransparency = 1
-    nameL.TextColor3             = col
-    nameL.Font                   = Enum.Font.GothamBold
-    nameL.TextSize               = 14
-    nameL.Text                   = player.Name .. " [" .. tag .. "]"
-    nameL.TextStrokeTransparency = 0
-    nameL.TextStrokeColor3       = Color3.new(0, 0, 0)
-    nameL.Parent                 = bb
+        d.WallText.Size    = CONFIG.TextSize - 1
+        d.WallText.Center  = false
+        d.WallText.Outline = true
+        d.WallText.Font    = 2
+        d.WallText.ZIndex  = 4
 
-    local infoL = Instance.new("TextLabel")
-    infoL.Size                   = UDim2.new(1, 0, 0, 14)
-    infoL.Position               = UDim2.new(0, 0, 0, 18)
-    infoL.BackgroundTransparency = 1
-    infoL.TextColor3             = Color3.fromRGB(220, 220, 220)
-    infoL.Font                   = Enum.Font.RobotoMono
-    infoL.TextSize               = 11
-    infoL.Text                   = ""
-    infoL.TextStrokeTransparency = 0
-    infoL.TextStrokeColor3       = Color3.new(0, 0, 0)
-    infoL.Parent                 = bb
+        for _, obj in pairs(d) do obj.Visible = false end
+        ESPStore[player] = d
+        return d
+    end
 
-    local hpBg = Instance.new("Frame")
-    hpBg.Size                   = UDim2.new(0.8, 0, 0, 5)
-    hpBg.Position               = UDim2.new(0.1, 0, 0, 34)
-    hpBg.BackgroundColor3       = Color3.fromRGB(40, 40, 40)
-    hpBg.BorderSizePixel        = 0
-    hpBg.Parent                 = bb
-    Instance.new("UICorner", hpBg).CornerRadius = UDim.new(0, 3)
+    local function hide(d)
+        for _, obj in pairs(d) do obj.Visible = false end
+    end
 
-    local hpFill = Instance.new("Frame")
-    hpFill.Size             = UDim2.new(1, 0, 1, 0)
-    hpFill.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
-    hpFill.BorderSizePixel  = 0
-    hpFill.Parent           = hpBg
-    Instance.new("UICorner", hpFill).CornerRadius = UDim.new(0, 3)
+    local function destroy(player)
+        local d = ESPStore[player]
+        if d then
+            for _, obj in pairs(d) do pcall(obj.Remove, obj) end
+            ESPStore[player] = nil
+        end
+    end
 
-    espCache[player] = {
-        highlight = hl,
-        billboard = bb,
-        nameL     = nameL,
-        infoL     = infoL,
-        hpFill    = hpFill,
-    }
-end
+    --// RENDER LOOP
+    table.insert(_conns, RunService.RenderStepped:Connect(function()
+        Camera = workspace.CurrentCamera
 
--- ESP update — thread riêng
-task.spawn(function()
-    while true do
-        task.wait(0.3)
         for _, player in ipairs(Players:GetPlayers()) do
             if player == LocalPlayer then continue end
 
-            local d    = espCache[player]
+            local d = ESPStore[player] or make(player)
+
+            -- Master toggle
+            if not CONFIG.ESPEnabled then
+                hide(d); continue
+            end
+
             local char = player.Character
             local hum  = char and char:FindFirstChildOfClass("Humanoid")
+            local root = char and (char:FindFirstChild("HumanoidRootPart")
+                                or char:FindFirstChild("Torso"))
+            local head = char and char:FindFirstChild("Head")
 
-            if not d and char and hum then
-                pcall(buildESP, player)
-                d = espCache[player]
+            if not (char and hum and root and head and hum.Health > 0) then
+                hide(d); continue
             end
-            if not d then continue end
-            if not char or not hum then
-                destroyESP(player)
+
+            local dist = (root.Position - Camera.CFrame.Position).Magnitude
+            if dist > CONFIG.MaxDist then hide(d); continue end
+
+            local _, onScreen, depth = w2s(root.Position)
+            if not onScreen or depth <= 0 then hide(d); continue end
+
+            local color  = getColor(player)
+            local topPos = w2s(head.Position + Vector3.new(0, 1, 0))
+            local botPos = w2s(root.Position - Vector3.new(0, 3, 0))
+            local midPos = w2s(root.Position)
+            local h      = math.abs(topPos.Y - botPos.Y)
+            local w      = h * 0.55
+            local bxPos  = Vector2.new(midPos.X - w / 2, topPos.Y)
+            local bxSize = Vector2.new(w, h)
+
+            ------------------------------------------------
+            -- BOX ESP
+            ------------------------------------------------
+            if CONFIG.BoxESP then
+                d.BoxOut.Position = bxPos
+                d.BoxOut.Size     = bxSize
+                d.BoxOut.Visible  = true
+                d.Box.Position = bxPos
+                d.Box.Size     = bxSize
+                d.Box.Color    = color
+                d.Box.Visible  = true
+            else
+                d.BoxOut.Visible = false
+                d.Box.Visible   = false
+            end
+
+            ------------------------------------------------
+            -- NAME + DISTANCE
+            ------------------------------------------------
+            if CONFIG.NameESP then
+                d.Name.Position = Vector2.new(midPos.X, topPos.Y - 18)
+                d.Name.Text     = player.DisplayName
+                d.Name.Color    = color
+                d.Name.Visible  = true
+
+                d.Dist.Position = Vector2.new(midPos.X, botPos.Y + 2)
+                d.Dist.Text     = ("[%d studs]"):format(dist)
+                d.Dist.Visible  = true
+            else
+                d.Name.Visible = false
+                d.Dist.Visible = false
+            end
+
+            ------------------------------------------------
+            -- HEALTH BAR
+            ------------------------------------------------
+            if CONFIG.HealthBar then
+                local pct = math.clamp(hum.Health / hum.MaxHealth, 0, 1)
+                local bw  = 3
+                local bx  = bxPos.X - bw - 4
+
+                d.HpOut.Position = Vector2.new(bx - 1, topPos.Y - 1)
+                d.HpOut.Size     = Vector2.new(bw + 2, h + 2)
+                d.HpOut.Visible  = true
+
+                d.HpBG.Position = Vector2.new(bx, topPos.Y)
+                d.HpBG.Size     = Vector2.new(bw, h)
+                d.HpBG.Visible  = true
+
+                d.HpBar.Position = Vector2.new(bx, topPos.Y + h * (1 - pct))
+                d.HpBar.Size     = Vector2.new(bw, h * pct)
+                d.HpBar.Color    = Color3.fromRGB(255 * (1 - pct), 255 * pct, 0)
+                d.HpBar.Visible  = true
+            else
+                d.HpOut.Visible = false
+                d.HpBG.Visible  = false
+                d.HpBar.Visible = false
+            end
+
+            ------------------------------------------------
+            -- WALL CHECK
+            ------------------------------------------------
+            if CONFIG.WallCheck then
+                local vis = isVisible(char)
+                d.WallText.Position = Vector2.new(bxPos.X + bxSize.X + 5, midPos.Y - 7)
+                if vis then
+                    d.WallText.Text  = "[Visible]"
+                    d.WallText.Color = Color3.fromRGB(0, 255, 100)
+                else
+                    d.WallText.Text  = "[Behind Wall]"
+                    d.WallText.Color = Color3.fromRGB(255, 170, 0)
+                end
+                d.WallText.Visible = true
+            else
+                d.WallText.Visible = false
+            end
+        end
+    end))
+
+    table.insert(_conns, Players.PlayerRemoving:Connect(destroy))
+
+-- ╔════════════════════════════════════════════╗
+-- ║  METHOD 2: HIGHLIGHT FALLBACK (PC + Mobile) ║
+-- ╚════════════════════════════════════════════╝
+else
+
+    _folder = Instance.new("Folder")
+    _folder.Name   = HttpService:GenerateGUID(false)
+    _folder.Parent = CoreGui
+
+    local function createHL(character, player)
+        if player == LocalPlayer then return end
+        local hum = character:WaitForChild("Humanoid", 5)
+        if not hum then return end
+
+        -- Xóa cũ
+        local tag = "E" .. player.UserId
+        local old = _folder:FindFirstChild(tag)
+        if old then old:Destroy() end
+        local old2 = _folder:FindFirstChild("I" .. player.UserId)
+        if old2 then old2:Destroy() end
+
+        local hl     = Instance.new("Highlight")
+        hl.Name      = tag
+        hl.Adornee   = character
+        hl.Parent    = _folder
+        hl.FillTransparency    = CONFIG.FillAlpha
+        hl.OutlineTransparency = 0
+        hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+
+        local headPart = character:WaitForChild("Head", 5)
+
+        local bb = Instance.new("BillboardGui")
+        bb.Name        = "I" .. player.UserId
+        bb.Adornee     = headPart
+        bb.Size        = UDim2.new(0, 200, 0, 60)
+        bb.StudsOffset = Vector3.new(0, 3, 0)
+        bb.AlwaysOnTop = true
+        bb.Parent      = _folder
+
+        local nameLbl = Instance.new("TextLabel")
+        nameLbl.Size               = UDim2.new(1, 0, 0.5, 0)
+        nameLbl.BackgroundTransparency = 1
+        nameLbl.Text               = player.DisplayName
+        nameLbl.TextStrokeTransparency = 0
+        nameLbl.TextScaled         = true
+        nameLbl.Font               = Enum.Font.GothamBold
+        nameLbl.Parent             = bb
+
+        local wallLbl = Instance.new("TextLabel")
+        wallLbl.Size               = UDim2.new(1, 0, 0.4, 0)
+        wallLbl.Position           = UDim2.new(0, 0, 0.55, 0)
+        wallLbl.BackgroundTransparency = 1
+        wallLbl.TextStrokeTransparency = 0
+        wallLbl.TextScaled         = true
+        wallLbl.Font               = Enum.Font.GothamBold
+        wallLbl.Parent             = bb
+
+        ESPStore[player] = {
+            hl = hl, bb = bb, char = character,
+            nameLbl = nameLbl, wallLbl = wallLbl,
+        }
+
+        hum.Died:Connect(function()
+            task.delay(1, function()
+                pcall(function() hl:Destroy() end)
+                pcall(function() bb:Destroy() end)
+            end)
+        end)
+    end
+
+    -- Cập nhật mỗi frame cho highlight
+    table.insert(_conns, RunService.RenderStepped:Connect(function()
+        Camera = workspace.CurrentCamera
+        for player, data in pairs(ESPStore) do
+            if not CONFIG.ESPEnabled then
+                data.hl.Enabled = false
+                data.bb.Enabled = false
                 continue
             end
 
-            pcall(function()
-                d.highlight.Enabled = espOn
-                d.billboard.Enabled = espOn
-            end)
-            if not espOn then continue end
+            data.hl.Enabled = true
+            data.bb.Enabled = CONFIG.NameESP
 
-            pcall(function()
-                local col = getTeamColor(player)
-                local tag = isEnemy(player) and "ENEMY" or "ALLY"
-                d.highlight.FillColor    = col
-                d.highlight.OutlineColor = col
-                d.nameL.TextColor3       = col
-                d.nameL.Text             = player.Name .. " [" .. tag .. "]"
+            local c = getColor(player)
+            data.hl.FillColor    = c
+            data.hl.OutlineColor = c
+            data.nameLbl.TextColor3 = c
 
-                local hp  = math.floor(hum.Health)
-                local max = math.floor(hum.MaxHealth)
-                local dst = math.floor(getDistance(char))
-                d.infoL.Text = string.format("HP %d/%d | %dm", hp, max, dst)
+            if CONFIG.WallCheck and data.char and data.char.Parent then
+                local vis = isVisible(data.char)
+                data.wallLbl.Visible = true
+                if vis then
+                    data.wallLbl.Text       = "[Visible]"
+                    data.wallLbl.TextColor3 = Color3.fromRGB(0, 255, 100)
+                else
+                    data.wallLbl.Text       = "[Behind Wall]"
+                    data.wallLbl.TextColor3 = Color3.fromRGB(255, 170, 0)
+                end
+            else
+                data.wallLbl.Visible = false
+            end
+        end
+    end))
 
-                local r = math.clamp(hum.Health / hum.MaxHealth, 0, 1)
-                d.hpFill.Size = UDim2.new(r, 0, 1, 0)
-                d.hpFill.BackgroundColor3 = r > 0.6
-                    and Color3.fromRGB(0, 255, 0)
-                    or r > 0.3
-                    and Color3.fromRGB(255, 255, 0)
-                    or Color3.fromRGB(255, 50, 50)
-            end)
+    local function onJoin(player)
+        if player == LocalPlayer then return end
+        table.insert(_conns, player.CharacterAdded:Connect(function(c)
+            task.wait(0.5)
+            createHL(c, player)
+        end))
+        if player.Character then createHL(player.Character, player) end
+    end
+
+    for _, p in ipairs(Players:GetPlayers()) do onJoin(p) end
+    table.insert(_conns, Players.PlayerAdded:Connect(onJoin))
+    table.insert(_conns, Players.PlayerRemoving:Connect(function(p)
+        local d = ESPStore[p]
+        if d then
+            pcall(function() d.hl:Destroy() end)
+            pcall(function() d.bb:Destroy() end)
+            ESPStore[p] = nil
+        end
+    end))
+end
+
+--// ========================
+--// CLEANUP (cho lần chạy sau)
+--// ========================
+_G._ESPClean = function()
+    -- Ngắt mọi connection
+    for _, c in pairs(_conns) do
+        pcall(function() c:Disconnect() end)
+    end
+    _conns = {}
+
+    -- Xóa Drawing objects / Instances
+    for _, d in pairs(ESPStore) do
+        for _, obj in pairs(d) do
+            pcall(function() obj:Remove() end)
+            pcall(function() obj:Destroy() end)
         end
     end
-end)
+    ESPStore = {}
 
--- Build ESP khi character spawn
-for _, p in ipairs(Players:GetPlayers()) do
-    if p ~= LocalPlayer then
-        if p.Character then task.defer(buildESP, p) end
-        p.CharacterAdded:Connect(function()
-            task.wait(0.5)
-            buildESP(p)
-        end)
+    -- Xóa GUI + folder
+    if _gui    then pcall(function() _gui:Destroy() end) end
+    if _folder then pcall(function() _folder:Destroy() end) end
+
+    -- Khôi phục thanh điều hướng (Mobile)
+    if isMobile then
+        StarterGui:SetCore("TopbarEnabled", true)
     end
 end
 
-Players.PlayerAdded:Connect(function(p)
-    p.CharacterAdded:Connect(function()
-        task.wait(0.5)
-        buildESP(p)
-    end)
-end)
-
-Players.PlayerRemoving:Connect(function(p)
-    destroyESP(p)
-end)
-
--- ═══════════════════════════════════════════════
--- CROSSHAIR DETECTION (Heartbeat — chỉ hiện tên)
--- ═══════════════════════════════════════════════
-local overlapping = {}
-
-RunService.Heartbeat:Connect(function()
-    if NotifLabel.Visible and tick() > notifHideTime then
-        NotifLabel.Visible = false
-    end
-
-    if not crosshairFrame or not crosshairFrame.Parent then return end
-    if not crosshairFrame.Visible then return end
-
-    Camera = workspace.CurrentCamera
-
-    local pos  = crosshairFrame.AbsolutePosition
-    local size = crosshairFrame.AbsoluteSize
-    local x1   = pos.X - PADDING
-    local y1   = pos.Y - PADDING
-    local x2   = pos.X + size.X + PADDING
-    local y2   = pos.Y + size.Y + PADDING
-
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player == LocalPlayer then continue end
-
-        local char = player.Character
-        local hum  = char and char:FindFirstChildOfClass("Humanoid")
-
-        if char and hum and hum.Health > 0 then
-            local hitPart = nil
-
-            for _, partName in ipairs(CHECK_PARTS) do
-                local part = char:FindFirstChild(partName)
-                if part and part:IsA("BasePart") then
-                    local sp, onScreen = Camera:WorldToScreenPoint(part.Position)
-                    if onScreen
-                       and sp.X >= x1 and sp.X <= x2
-                       and sp.Y >= y1 and sp.Y <= y2
-                    then
-                        hitPart = partName
-                        break
-                    end
-                end
-            end
-
-            if hitPart then
-                if not overlapping[player.Name] then
-                    overlapping[player.Name] = true
-                    currentTarget = player
-                    totalHits += 1
-
-                    local enemy = isEnemy(player)
-                    local d3    = math.floor(getDistance(char))
-                    local hp    = math.floor(hum.Health)
-                    local mhp   = math.floor(hum.MaxHealth)
-
-                    showNotif(
-                        string.format(
-                            '<b>%s</b> [%s] | %s | HP %d/%d | %dm',
-                            player.Name,
-                            enemy and '<font color="#FF4444">ENEMY</font>'
-                                   or '<font color="#44FF44">ALLY</font>',
-                            hitPart, hp, mhp, d3
-                        ),
-                        enemy and Color3.fromRGB(255, 60, 60)
-                              or  Color3.fromRGB(60, 255, 60)
-                    )
-                    HitCounter.Text = string.format(
-                        '<font color="#00FF88">Hits: %d</font>', totalHits
-                    )
-                    refreshStatus()
-                end
-            else
-                if overlapping[player.Name] then
-                    overlapping[player.Name] = nil
-                    if currentTarget == player then
-                        currentTarget = nil
-                        refreshStatus()
-                    end
-                end
-            end
-        else
-            if overlapping[player.Name] then
-                overlapping[player.Name] = nil
-            end
-        end
-    end
-end)
-
--- ═══════════════════════════════════════════════
--- KEYBIND
--- ═══════════════════════════════════════════════
-UserInputService.InputBegan:Connect(function(input, gpe)
-    if gpe then return end
-    if input.KeyCode == Enum.KeyCode.F2 then
-        espOn = not espOn
-        refreshStatus()
-        showNotif(
-            espOn and "ESP: <b>ON</b>" or "ESP: <b>OFF</b>",
-            espOn and Color3.fromRGB(80, 255, 80) or Color3.fromRGB(255, 80, 80)
-        )
-    end
-end)
-
--- ═══════════════════════════════════════════════
--- RESPAWN
--- ═══════════════════════════════════════════════
-LocalPlayer.CharacterAdded:Connect(function()
-    task.wait(1)
-    Camera = workspace.CurrentCamera
-end)
-
-print("v5.0 loaded | [F2] ESP | Crosshair detect only")
+print("[ESP] Loaded | PC: RightShift | Mobile: Tap 'ESP' button")
